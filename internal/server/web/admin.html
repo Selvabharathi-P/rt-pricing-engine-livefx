@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Admin Console</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="top"></header>
+<main>
+  <div class="tiles" id="tiles"></div>
+
+  <section class="card hidden" id="review">
+    <div class="chart-head"><h2 id="rv-title">Review</h2><button class="btn ghost" type="button" id="rv-close">Close</button></div>
+    <div class="grid2">
+      <div>
+        <h3>Account</h3><dl class="kv" id="rv-profile"></dl>
+        <h3>Live sessions</h3><div id="rv-sessions" class="small"></div>
+      </div>
+      <div>
+        <h3>KYC details <span class="small muted">(decrypted for you — this view is audit-logged)</span></h3>
+        <dl class="kv" id="rv-pii"></dl>
+        <p id="rv-doc" class="small"></p>
+      </div>
+    </div>
+    <h3>Decision</h3>
+    <div class="row">
+      <div><label for="rv-days">Approval valid for (days)</label><input id="rv-days" type="number" min="1" max="3650" value="365"></div>
+      <div class="flex2"><label for="rv-reason">Reason (required to reject; shown to the merchant)</label><input id="rv-reason" maxlength="300"></div>
+    </div>
+    <div class="actions">
+      <button class="btn ok" type="button" id="rv-approve">Approve</button>
+      <button class="btn danger" type="button" id="rv-reject">Reject</button>
+      <button class="btn ghost" type="button" id="rv-reverify">Force re-verification</button>
+      <button class="btn ghost" type="button" id="rv-revoke">Revoke API key</button>
+      <button class="btn ghost" type="button" id="rv-disable">Disable account</button>
+    </div>
+    <div id="rv-msg" class="msg"></div>
+  </section>
+
+  <section class="card">
+    <div class="tools">
+      <h2 class="inline-h2">Merchants</h2>
+      <input id="filter" type="search" placeholder="Search email or name">
+      <select id="status"><option value="">All KYC statuses</option><option value="pending">Pending review</option>
+        <option value="approved">Approved</option><option value="rejected">Rejected</option><option value="expired">Expired</option>
+        <option value="not_submitted">Not submitted</option></select>
+    </div>
+    <div class="wrap"><table>
+      <thead><tr><th>Merchant</th><th>Role</th><th>KYC</th><th>Trading</th><th>API key</th><th>Live sessions / subscribed</th><th>Joined</th><th></th></tr></thead>
+      <tbody id="merchants"><tr><td colspan="8" class="empty">Loading…</td></tr></tbody>
+    </table></div>
+    <div class="pager" id="m-pager"></div>
+  </section>
+
+  <section class="card">
+    <h2>Live WebSocket sessions</h2>
+    <div class="wrap"><table>
+      <thead><tr><th>Merchant</th><th>Remote</th><th>Auth</th><th>Format</th><th>Subscribed</th><th>Frames</th><th>Connected</th></tr></thead>
+      <tbody id="sessions"></tbody>
+    </table></div>
+  </section>
+
+  <section class="card">
+    <h2>Audit log</h2>
+    <div class="wrap"><table>
+      <thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Target</th><th>Detail</th></tr></thead>
+      <tbody id="audit"></tbody>
+    </table></div>
+    <div class="pager" id="a-pager"></div>
+  </section>
+</main>
+<script src="/static/app.js"></script>
+<script src="/static/admin.js"></script>
+</body>
+</html>
