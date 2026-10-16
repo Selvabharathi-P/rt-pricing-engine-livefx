@@ -9,17 +9,6 @@
   let merchants = [], current = null, counts = {}, mPage = 1, aPage = 1, mInfo = null, aInfo = null;
   const syms = (list) => !list || !list.length ? '–' : list[0] === '*' ? 'all symbols' : list.map(esc).join(', ');
 
-  // pager renders "‹ Prev  Page x of y · n items  Next ›" and calls go(page).
-  function pager(el, info, noun, go) {
-    if (!info || info.total === 0) { el.innerHTML = ''; return; }
-    const from = (info.page - 1) * info.size + 1, to = Math.min(info.page * info.size, info.total);
-    el.innerHTML = `<button class="btn ghost" type="button" data-p="prev" ${info.page <= 1 ? 'disabled' : ''}>‹ Prev</button>
-      <span class="small muted">${from}–${to} of ${info.total} ${noun} · page ${info.page} of ${info.pages}</span>
-      <button class="btn ghost" type="button" data-p="next" ${info.page >= info.pages ? 'disabled' : ''}>Next ›</button>`;
-    el.querySelector('[data-p=prev]').addEventListener('click', () => go(info.page - 1));
-    el.querySelector('[data-p=next]').addEventListener('click', () => go(info.page + 1));
-  }
-
   let lastUp = null;
   function upstreamTile(hz) {
     const s = hz?.upstream_status;

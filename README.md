@@ -78,8 +78,12 @@ the flow once.
    The admin page shows each merchant's role, KYC status, API key, live
    sessions with their subscribed symbols, and the audit log.
 5. **Back as the merchant**, on **My account**: generate an API key (the
-   secret is shown once), then open **Live quotes**. Click a row for 1m
-   candles.
+   secret is shown once), then open **Live quotes**. Click a row for candles:
+   - the current candle updates on every tick;
+   - pick a window: 30m / 1h / 3h / 6h / 12h / 24h, with longer windows
+     merging into 5m–30m candles;
+   - periods with no data, such as an upstream outage, show as shaded
+     "no data" bands on a real time axis.
 
 ```bash
 curl localhost:8080/healthz                                    # public

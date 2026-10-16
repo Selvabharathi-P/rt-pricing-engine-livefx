@@ -13,12 +13,20 @@ function badge(text) {
   return `<span class="badge b-${esc(t)}">${esc(t.replace(/_/g, ' '))}</span>`;
 }
 
-// ago(ms) -> "8s ago", "12m ago", "3h ago"
-function ago(ms) {
-  const s = Math.max(0, Math.round(ms / 1000));
-  if (s < 60) return s + 's ago';
-  if (s < 3600) return Math.floor(s / 60) + 'm ago';
-  return Math.floor(s / 3600) + 'h ago';
+// timeAgo(ts, now) -> "just now", "25 sec ago", "5 min ago", "2 hr ago",
+// then a short date + time ("16 Oct, 17:32") once it is a day or older.
+function timeAgo(ts, now = Date.now()) {
+  const s = Math.max(0, Math.round((now - ts) / 1000));
+  if (s < 10) return 'just now';
+  if (s < 60) return `${s} sec ago`;
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)} hr ago`;
+  return new Date(ts).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
+
+// exactTime(ts) -> "16 Oct 2026, 17:32:05" (local time), for tooltips.
+function exactTime(ts) {
+  return new Date(ts).toLocaleString([], { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
 function fmtTime(s) {
@@ -127,6 +135,24 @@ async function api(path, { method = 'GET', body, form, retry = true } = {}) {
   if (res.status === 429) toast('warn', 'Too many requests. Please wait a moment and try again.', { id: 'rate' });
   else if (res.status >= 500) toast('err', 'Server error. Please try again shortly.', { id: 'server' });
   return { ok: res.ok, status: res.status, data };
+}
+
+// pager renders "‹ Prev · 1–10 of N noun · page x of y · Next ›" into el and
+// calls go(page). With opts.sizes it adds a "Rows per page" selector that
+// calls opts.onSize(size). info = {page, size, total, pages}.
+function pager(el, info, noun, go, opts = {}) {
+  if (!info || info.total === 0) { el.innerHTML = ''; return; }
+  const from = (info.page - 1) * info.size + 1, to = Math.min(info.page * info.size, info.total);
+  const sizes = opts.sizes
+    ? `<label class="small muted pager-size">Rows per page <select data-p="size">${opts.sizes.map((s) =>
+        `<option value="${s}" ${s === info.size ? 'selected' : ''}>${s}</option>`).join('')}</select></label>`
+    : '';
+  el.innerHTML = `${sizes}<button class="btn ghost" type="button" data-p="prev" ${info.page <= 1 ? 'disabled' : ''}>‹ Prev</button>
+    <span class="small muted">${from}–${to} of ${info.total} ${esc(noun)} · page ${info.page} of ${info.pages}</span>
+    <button class="btn ghost" type="button" data-p="next" ${info.page >= info.pages ? 'disabled' : ''}>Next ›</button>`;
+  el.querySelector('[data-p=prev]').addEventListener('click', () => go(info.page - 1));
+  el.querySelector('[data-p=next]').addEventListener('click', () => go(info.page + 1));
+  el.querySelector('[data-p=size]')?.addEventListener('change', (e) => opts.onSize(Number(e.target.value)));
 }
 
 // errText turns an API error into a readable sentence.
