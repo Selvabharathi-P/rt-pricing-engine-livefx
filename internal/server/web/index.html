@@ -16,18 +16,18 @@
   </section>
   <div id="live">
     <div class="card tools">
-      <span class="status"><span id="dot" class="dot"></span><span id="state" class="muted">connecting…</span></span>
+      <span class="status"><span id="dot" class="dot"></span><span id="state" class="muted">Connecting…</span></span>
       <div class="stats">
         <span>symbols <b id="nsym">0</b></span>
         <span>updates/s <b id="ups">0</b></span>
-        <span>last frame <b id="fsize">–</b></span>
         <span>latency <b id="lat">–</b></span>
       </div>
     </div>
     <section id="chart" class="card" hidden>
       <div class="chart-head">
-        <h2 id="c-sym"></h2><span class="ohlc">1m candles · mid price</span>
+        <h2 id="c-sym"></h2><span class="ohlc" id="c-desc"></span>
         <span class="ohlc" id="c-ohlc"></span>
+        <div class="seg" id="c-win" role="group" aria-label="Time window"></div>
         <button id="c-close" class="btn ghost" type="button" aria-label="Close chart">Close</button>
       </div>
       <canvas id="cv"></canvas>
@@ -38,12 +38,14 @@
     <p class="table-note">Click a column header to sort (click again to reverse). Click a row for 1-minute candles. 24h high, low and % change are computed by the engine from observed ticks on the <b>mid</b> price, not taken from the upstream feed. Latency = local receive time − tick timestamp.</p>
     <div class="wrap">
       <table id="quotes" class="num">
+        <colgroup><col class="c-sym"><col class="c-px"><col class="c-px"><col class="c-mid"><col class="c-spr"><col class="c-hl"><col class="c-hl"><col class="c-chg"><col class="c-upd"></colgroup>
         <thead><tr>
           <th data-key="symbol" aria-sort="ascending"><button type="button" class="sort">Symbol<span class="arr" aria-hidden="true"></span></button></th><th data-key="buy" aria-sort="none"><button type="button" class="sort">Buy<span class="arr" aria-hidden="true"></span></button></th><th data-key="sell" aria-sort="none"><button type="button" class="sort">Sell<span class="arr" aria-hidden="true"></span></button></th><th data-key="mid" aria-sort="none"><button type="button" class="sort">Mid<span class="arr" aria-hidden="true"></span></button></th><th data-key="spread" aria-sort="none"><button type="button" class="sort">Spread<span class="arr" aria-hidden="true"></span></button></th><th data-key="hi" aria-sort="none"><button type="button" class="sort">24h High<span class="arr" aria-hidden="true"></span></button></th><th data-key="lo" aria-sort="none"><button type="button" class="sort">24h Low<span class="arr" aria-hidden="true"></span></button></th><th data-key="chg" aria-sort="none"><button type="button" class="sort">24h %<span class="arr" aria-hidden="true"></span></button></th><th data-key="ts" aria-sort="none"><button type="button" class="sort">Updated<span class="arr" aria-hidden="true"></span></button></th>
         </tr></thead>
         <tbody id="rows"><tr><td class="empty" colspan="9">Waiting for prices…</td></tr></tbody>
       </table>
     </div>
+    <div class="pager" id="q-pager"></div>
   </div>
 </main>
 <script src="/static/app.js"></script>

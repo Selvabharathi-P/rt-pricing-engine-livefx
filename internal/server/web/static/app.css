@@ -103,7 +103,6 @@ td.flash-up { background: var(--up-bg); } td.flash-down { background: var(--down
 .chart-head h2 { font-size: 15px; margin: 0; }
 .ohlc { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .ohlc b { color: var(--ink); font-weight: 600; }
-.chart-head button { margin-left: auto; }
 canvas { display: block; width: 100%; height: 280px; }
 .inline-h2 { margin: 0; flex: 0 0 auto; align-self: center; }
 .row > .flex2 { flex: 2; }
@@ -138,3 +137,27 @@ canvas { display: block; width: 100%; height: 280px; }
 #quotes th button.sort:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 #quotes th.sorted { color: var(--ink); }
 #quotes th .arr { display: inline-block; width: 1em; margin-left: 4px; font-size: 10px; color: var(--accent); }
+.pager-size { display: inline-flex; align-items: center; gap: 6px; margin-right: auto; }
+.pager-size select { width: auto; padding: 4px 6px; }
+
+/* stable layout: changing digits never shift anything */
+.dot.warn { background: #f59e0b; }
+/* The counters are pinned to the right edge with fixed-width values, so
+   neither the status text length nor changing digits can move them. */
+#state { display: inline-block; max-width: 34ch; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+.card.tools .stats { margin-left: auto; }
+.stats b { display: inline-block; text-align: left; white-space: nowrap; }
+#nsym { width: 3ch; } #ups { width: 5ch; } #lat { width: 7ch; }
+#quotes { table-layout: fixed; min-width: 900px; }
+#quotes td { overflow: hidden; text-overflow: ellipsis; }
+#quotes col.c-sym { width: 11%; } #quotes col.c-px { width: 11%; } #quotes col.c-mid { width: 12%; }
+#quotes col.c-spr { width: 9%; } #quotes col.c-hl { width: 12%; } #quotes col.c-chg { width: 9%; } #quotes col.c-upd { width: 13%; }
+.ohlc#c-ohlc { display: inline-block; min-width: 46ch; }
+
+/* chart time-window selector */
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; margin-left: auto; }
+.seg button { background: transparent; border: 0; border-right: 1px solid var(--line); color: var(--muted); font: inherit; font-size: 12px; padding: 4px 9px; cursor: pointer; }
+.seg button:last-child { border-right: 0; }
+.seg button:hover { color: var(--ink); }
+.seg button.on { background: var(--accent); color: var(--accent-ink); }
+.chart-head .seg + button { margin-left: 8px; }
