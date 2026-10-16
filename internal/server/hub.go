@@ -33,12 +33,14 @@ type Options struct {
 	AuthTimeout         time.Duration // unauthenticated sockets are closed after this
 	MaxConnsPerMerchant int
 	RevalidateEvery     time.Duration // re-check each merchant's right to trade
+	UpstreamDebounce    time.Duration // announce "upstream down" only if it lasts this long
 }
 
 func DefaultOptions() Options {
 	return Options{MaxClients: 10000, MaxFrameBytes: 10*1024 - 256, WriteTimeout: 5 * time.Second,
 		PongTimeout: 60 * time.Second, MsgRate: 10, MsgBurst: 20,
-		RequireAuth: true, AuthTimeout: 10 * time.Second, MaxConnsPerMerchant: 5, RevalidateEvery: 30 * time.Second}
+		RequireAuth: true, AuthTimeout: 10 * time.Second, MaxConnsPerMerchant: 5, RevalidateEvery: 30 * time.Second,
+		UpstreamDebounce: 3 * time.Second}
 }
 
 // Identity is an authenticated downstream merchant.
@@ -84,6 +86,11 @@ type Hub struct {
 	auth    Authorizer
 	authLim *rate.Limiter // global cap on auth attempts (brute force across sockets)
 
+	upMu    sync.Mutex
+	upCur   UpstreamStatus // actual state, as reported by the feed client
+	upPub   UpstreamStatus // last state announced to clients
+	upTimer *time.Timer
+
 	upgrader websocket.Upgrader
 }
 
@@ -105,6 +112,73 @@ func NewHub(opts Options, eng *engine.Engine, m *metrics.Set, log *slog.Logger) 
 }
 
 func (h *Hub) SetAuthorizer(a Authorizer) { h.auth = a }
+
+// UpstreamStatus is the market-data provider connection state, as shown to
+// web clients ({"t":"upstream", ...} and in "welcome").
+type UpstreamStatus struct {
+	Up     bool   `json:"up"`
+	Reason string `json:"reason"` // connecting | connected | session_in_use | auth_rejected | disconnected
+	Since  int64  `json:"since"`  // unix ms of the change
+}
+
+// SetUpstream records the upstream state (wired to feed.Client.OnStatus).
+// Recoveries are announced at once; outages only after UpstreamDebounce, so
+// a quick reconnect never flashes a warning at users.
+func (h *Hub) SetUpstream(up bool, reason string) {
+	h.upMu.Lock()
+	defer h.upMu.Unlock()
+	if h.upCur.Up == up && h.upCur.Reason == reason && h.upCur.Since != 0 {
+		return
+	}
+	h.upCur = UpstreamStatus{Up: up, Reason: reason, Since: time.Now().UnixMilli()}
+	if h.upTimer != nil {
+		h.upTimer.Stop()
+		h.upTimer = nil
+	}
+	if up {
+		go h.publishUpstream()
+	} else {
+		h.upTimer = time.AfterFunc(h.opts.UpstreamDebounce, h.publishUpstream)
+	}
+}
+
+// Upstream returns the last state announced to clients.
+func (h *Hub) Upstream() UpstreamStatus {
+	h.upMu.Lock()
+	defer h.upMu.Unlock()
+	if h.upPub.Since == 0 {
+		return UpstreamStatus{Reason: "connecting", Since: time.Now().UnixMilli()}
+	}
+	return h.upPub
+}
+
+func (h *Hub) publishUpstream() {
+	h.upMu.Lock()
+	s := h.upCur
+	if s.Up == h.upPub.Up && s.Reason == h.upPub.Reason && h.upPub.Since != 0 {
+		h.upMu.Unlock()
+		return
+	}
+	first := h.upPub.Since == 0
+	h.upPub = s
+	h.upMu.Unlock()
+	if first && s.Up {
+		return // normal start-up: nothing to tell anyone
+	}
+	msg := map[string]any{"t": "upstream", "up": s.Up, "reason": s.Reason, "since": s.Since}
+	// Copy first: sendCtrl may close a client, and closing takes h.mu.
+	h.mu.RLock()
+	cs := make([]*Client, 0, len(h.clients))
+	for c := range h.clients {
+		if c.authed.Load() {
+			cs = append(cs, c)
+		}
+	}
+	h.mu.RUnlock()
+	for _, c := range cs {
+		c.sendCtrl(msg)
+	}
+}
 
 // bind attaches an identity to c, enforcing the per-merchant session limit.
 func (h *Hub) bind(c *Client, id Identity) bool {
@@ -375,7 +449,8 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c.sendCtrl(map[string]any{"t": "welcome", "fields": JSONFields, "symbols": h.eng.Symbols(),
-		"format": map[bool]string{true: "binary", false: "json"}[c.binary], "auth_required": !c.authed.Load()})
+		"format": map[bool]string{true: "binary", false: "json"}[c.binary], "auth_required": !c.authed.Load(),
+		"upstream": h.Upstream()})
 	if s := r.URL.Query().Get("symbols"); s != "" {
 		c.deferred = strings.Split(s, ",")
 	}

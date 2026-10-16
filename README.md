@@ -24,6 +24,8 @@ Measured results (details in [Performance](#performance)):
 |---|---|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Architecture diagram, numbered data flow, tick sequence, components, goroutines, storage layout, scaling |
 | [docs/SECURITY.md](docs/SECURITY.md) | Written answer to the KYC & Authentication scenario, with Go middleware |
+| [docs/CHALLENGES.md](docs/CHALLENGES.md) | Problems faced and how they were solved, in narrative form |
+| [docs/24H-STATS.md](docs/24H-STATS.md) | How 24h high, low and % change are computed, with a worked example |
 
 ![Architecture](docs/architecture.svg)
 

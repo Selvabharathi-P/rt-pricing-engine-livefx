@@ -38,14 +38,12 @@
         <p class="small muted">Name, date of birth, document number and the scan are encrypted (AES-256-GCM) before storage and are visible only to admins, with every view audit-logged.</p>
         <div class="actions"><button class="btn" type="submit">Submit for review</button></div>
       </form>
-      <div id="kyc-msg" class="msg"></div>
     </section>
   </div>
 
   <section class="card">
     <h2>Trading access &amp; API key</h2>
     <div id="access"></div>
-    <div id="key-msg" class="msg"></div>
   </section>
 
   <section class="card">
@@ -57,7 +55,6 @@
       <div><label for="o-qty">Quantity</label><input id="o-qty" type="number" value="1000" min="1" step="any" required></div>
       <div><label>&nbsp;</label><button class="btn" type="submit">Place order</button></div>
     </form>
-    <div id="order-msg" class="msg"></div>
   </section>
 </main>
 <script src="/static/app.js"></script>

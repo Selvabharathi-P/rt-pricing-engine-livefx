@@ -266,3 +266,76 @@ func TestPagesAndCSP(t *testing.T) {
 		t.Fatalf("unknown path served: %d", resp.StatusCode)
 	}
 }
+
+// collect reads every message on c in the background (a gorilla read that
+// times out breaks the connection, so "nothing arrives" is checked here).
+func collect(c *websocket.Conn) <-chan map[string]any {
+	ch := make(chan map[string]any, 64)
+	go func() {
+		defer close(ch)
+		for {
+			_, b, err := c.ReadMessage()
+			if err != nil {
+				return
+			}
+			var m map[string]any
+			json.Unmarshal(b, &m)
+			ch <- m
+		}
+	}()
+	return ch
+}
+
+func next(ch <-chan map[string]any, want string, wait time.Duration) (map[string]any, bool) {
+	deadline := time.After(wait)
+	for {
+		select {
+		case m, ok := <-ch:
+			if !ok {
+				return nil, false
+			}
+			if m["t"] == want {
+				return m, true
+			}
+		case <-deadline:
+			return nil, false
+		}
+	}
+}
+
+// Upstream outages are pushed to clients (debounced); recoveries at once.
+func TestUpstreamStatusBroadcast(t *testing.T) {
+	h := newHarness(t, "EURUSD")
+	h.hub.opts.UpstreamDebounce = 100 * time.Millisecond
+	ch := collect(h.dial(t, ""))
+	w, _ := next(ch, "welcome", 2*time.Second)
+	if up := w["upstream"].(map[string]any); up["reason"] != "connecting" {
+		t.Fatalf("welcome upstream: %v", up)
+	}
+	h.hub.SetUpstream(true, "connected") // normal start-up: silent
+	if m, got := next(ch, "upstream", 300*time.Millisecond); got {
+		t.Fatalf("start-up connect announced: %v", m)
+	}
+	h.hub.SetUpstream(false, "disconnected") // quick blip: debounced away
+	time.Sleep(20 * time.Millisecond)
+	h.hub.SetUpstream(true, "connected")
+	if m, got := next(ch, "upstream", 300*time.Millisecond); got {
+		t.Fatalf("short blip announced: %v", m)
+	}
+	h.hub.SetUpstream(false, "session_in_use") // real outage
+	m, got := next(ch, "upstream", 2*time.Second)
+	if !got || m["up"] != false || m["reason"] != "session_in_use" {
+		t.Fatalf("outage not announced: %v", m)
+	}
+	h.hub.SetUpstream(true, "connected") // recovery: immediate
+	if m, got = next(ch, "upstream", time.Second); !got || m["up"] != true {
+		t.Fatalf("recovery not announced: %v", m)
+	}
+	// A page opened during an outage learns about it from welcome.
+	h.hub.SetUpstream(false, "auth_rejected")
+	time.Sleep(250 * time.Millisecond)
+	w2, _ := next(collect(h.dial(t, "")), "welcome", 2*time.Second)
+	if up := w2["upstream"].(map[string]any); up["up"] != false || up["reason"] != "auth_rejected" {
+		t.Fatalf("late joiner welcome: %v", up)
+	}
+}

@@ -3,6 +3,7 @@ package feed
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -228,5 +229,17 @@ func TestClientSessionInUse(t *testing.T) {
 	err := c.session(context.Background())
 	if !errors.Is(err, ErrSessionInUse) || errors.Is(err, ErrAuth) {
 		t.Fatalf("want ErrSessionInUse only, got %v", err)
+	}
+}
+
+func TestReason(t *testing.T) {
+	for err, want := range map[error]string{
+		fmt.Errorf("%w: busy", ErrSessionInUse): StatusSessionInUse,
+		fmt.Errorf("%w: bad", ErrAuth):          StatusAuthRejected,
+		errors.New("read: i/o timeout"):         StatusDisconnected,
+	} {
+		if got := Reason(err); got != want {
+			t.Errorf("Reason(%v) = %s, want %s", err, got, want)
+		}
 	}
 }

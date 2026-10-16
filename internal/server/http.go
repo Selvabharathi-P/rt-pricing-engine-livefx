@@ -65,7 +65,7 @@ func Routes(h *Hub, eng *engine.Engine, m *metrics.Set, health HealthFunc, prote
 		ctx, cancel := context.WithTimeout(r.Context(), time.Second)
 		defer cancel()
 		up, serr := health(ctx)
-		body := map[string]any{"status": "ok", "upstream": up, "store": "ok", "clients": h.Clients()}
+		body := map[string]any{"status": "ok", "upstream": up, "upstream_status": h.Upstream(), "store": "ok", "clients": h.Clients()}
 		code := http.StatusOK
 		if serr != nil {
 			// Still serving from memory: degraded, not down.

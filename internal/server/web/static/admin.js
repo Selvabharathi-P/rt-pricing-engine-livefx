@@ -2,7 +2,7 @@
 (async () => {
   const me = await requireMe();
   if (!me) return;
-  if (me.role !== 'admin') { location.href = '/account'; return; }
+  if (me.role !== 'admin') { flash('err', 'Admin access required. You were redirected to your account.'); location.href = '/account'; return; }
   renderNav(me, 'admin', 'Admin Console');
 
   const PAGE_SIZE = 10;
@@ -20,14 +20,29 @@
     el.querySelector('[data-p=next]').addEventListener('click', () => go(info.page + 1));
   }
 
-  function tiles(ss) {
+  let lastUp = null;
+  function upstreamTile(hz) {
+    const s = hz?.upstream_status;
+    if (!s) return ['Upstream feed', '?'];
+    if (lastUp !== null && lastUp !== s.up) {
+      if (s.up) toast('ok', 'Upstream market feed recovered.', { id: 'upstream' });
+      else toast('warn', `Upstream market feed down: ${UPSTREAM_TEXT[s.reason] || s.reason}.`, { id: 'upstream', sticky: true });
+    } else if (lastUp === null && !s.up && s.reason !== 'connecting') {
+      toast('warn', `Upstream market feed down: ${UPSTREAM_TEXT[s.reason] || s.reason}.`, { id: 'upstream', sticky: true });
+    }
+    lastUp = s.up;
+    return ['Upstream feed', s.up ? 'up' : (s.reason || 'down').replace(/_/g, ' ')];
+  }
+
+  function tiles(ss, hz) {
     $('tiles').innerHTML = [
       ['Merchants', counts.merchants || 0],
       ['Pending review', counts.pending || 0],
       ['Verified', counts.verified || 0],
       ['Disabled', counts.disabled || 0],
       ['Live sessions', ss.length],
-    ].map(([l, v]) => `<div class="tile"><b>${v}</b><span>${l}</span></div>`).join('');
+      upstreamTile(hz),
+    ].map(([l, v]) => `<div class="tile"><b class="${typeof v === 'number' ? '' : 'txt'}">${esc(v)}</b><span>${esc(l)}</span></div>`).join('');
   }
 
   function table() {
@@ -56,7 +71,8 @@
   async function loadMerchants() {
     const qs = new URLSearchParams({ page: mPage, size: PAGE_SIZE, q: $('filter').value.trim(), status: $('status').value });
     const r = await api('/api/v1/admin/merchants?' + qs);
-    if (r.status === 401 || r.status === 403) { location.href = '/login'; return false; }
+    if (r.status === 401) { goLogin(); return false; }
+    if (r.status === 403) { flash('err', 'Admin access required.'); location.href = '/account'; return false; }
     if (!r.ok) return true;
     merchants = r.data.items; counts = r.data.counts || {}; mInfo = r.data;
     mPage = r.data.page; // server clamps past-the-end pages (e.g. after a filter shrinks the list)
@@ -77,9 +93,9 @@
 
   async function refresh() {
     if (!(await loadMerchants())) return;
-    const s = await api('/api/v1/admin/sessions');
+    const [s, hzr] = await Promise.all([api('/api/v1/admin/sessions'), api('/healthz')]);
     const ss = s.ok ? s.data : [];
-    tiles(ss); sessions(ss); audit();
+    tiles(ss, hzr.ok ? hzr.data : null); sessions(ss); audit();
   }
 
   async function openReview(id) {
@@ -111,8 +127,8 @@
 
   async function act(path, body, okText, method = 'POST') {
     const r = await api(path, { method, body });
-    if (r.ok) { showMsg($('rv-msg'), true, okText); await refresh(); await openReview(current.profile.id); showMsg($('rv-msg'), true, okText); }
-    else showMsg($('rv-msg'), false, r.data?.error || 'Action failed');
+    if (r.ok) { toast('ok', okText); await refresh(); await openReview(current.profile.id); }
+    else if (r.status) toast('err', errText(r, 'Action failed.'));
   }
   const base = () => '/api/v1/admin/merchants/' + encodeURIComponent(current.profile.id);
 

@@ -32,6 +32,36 @@ type Client struct {
 	out chan<- []model.Tick
 	log *slog.Logger
 	m   *metrics.Set
+
+	// OnStatus, if set, is told whenever the upstream session goes up or
+	// down, with one of the Status* reasons (used to inform web clients).
+	OnStatus func(up bool, reason string)
+}
+
+// Upstream status reasons.
+const (
+	StatusConnected    = "connected"
+	StatusSessionInUse = "session_in_use" // another client holds the one-per-key session
+	StatusAuthRejected = "auth_rejected"  // credentials refused
+	StatusDisconnected = "disconnected"   // network error, timeout, server closed
+)
+
+// Reason classifies why a session ended.
+func Reason(err error) string {
+	switch {
+	case errors.Is(err, ErrSessionInUse):
+		return StatusSessionInUse
+	case errors.Is(err, ErrAuth):
+		return StatusAuthRejected
+	default:
+		return StatusDisconnected
+	}
+}
+
+func (c *Client) status(up bool, reason string) {
+	if c.OnStatus != nil {
+		c.OnStatus(up, reason)
+	}
 }
 
 func NewClient(cfg Config, out chan<- []model.Tick, log *slog.Logger, m *metrics.Set) *Client {
@@ -70,6 +100,7 @@ func (c *Client) Run(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
+		c.status(false, Reason(err))
 		if time.Since(start) > stableAfter {
 			backoff = minBackoff
 		}
@@ -122,6 +153,7 @@ func (c *Client) session(ctx context.Context) error {
 	}
 	c.log.Info("upstream subscribed", "symbols", len(c.cfg.Symbols))
 	c.m.UpstreamUp.Set(1)
+	c.status(true, StatusConnected)
 
 	conn.SetPongHandler(func(string) error {
 		return conn.SetReadDeadline(time.Now().Add(c.cfg.ReadTimeout))

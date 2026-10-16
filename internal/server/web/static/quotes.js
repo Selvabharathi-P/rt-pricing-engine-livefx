@@ -12,6 +12,23 @@
   const dec = (v) => { const s = String(v); const i = s.indexOf('.'); return i < 0 ? 0 : s.length - i - 1; };
   const fmt = (v, d) => Number.isFinite(v) ? v.toFixed(d) : '–';
 
+  // Upstream = LiveFXHub. Our socket can be fine while the provider is down,
+  // in which case prices freeze: say so loudly instead of looking "live".
+  let upDown = false;
+  function upstream(s, initial) {
+    if (s.up) {
+      if (upDown) toast('ok', 'Live prices resumed.', { id: 'upstream' });
+      upDown = false;
+      setState(true, 'live');
+      return;
+    }
+    if (s.reason === 'connecting') { if (initial) setState(false, 'waiting for market data'); return; }
+    upDown = true;
+    setState(false, 'market feed down');
+    toast('warn', `Live prices paused: ${UPSTREAM_TEXT[s.reason] || 'market data unavailable'}. Prices shown may be stale.`,
+      { id: 'upstream', sticky: true });
+  }
+
   function setState(on, text) {
     $('dot').className = 'dot ' + (on ? 'on' : 'off');
     $('state').textContent = text;
@@ -23,7 +40,10 @@
     $('live').classList.add('hidden');
   }
 
+  let wasLive = false; // only announce a reconnect after a real disconnect
   function backoff(text) {
+    if (wasLive) toast('warn', 'Live feed disconnected. Reconnecting…', { id: 'feed', sticky: true });
+    wasLive = false;
     setState(false, `${text} · retry in ${Math.round(retry / 1000)}s`);
     setTimeout(connect, retry);
     retry = Math.min(retry * 2, 15000);
@@ -31,19 +51,28 @@
 
   async function connect() {
     const t = await api('/api/v1/ws-ticket', { method: 'POST' });
-    if (t.status === 401) { location.href = '/login'; return; }
+    if (t.status === 401) { goLogin(); return; }
     if (t.status === 403) { setState(false, 'locked'); locked(t.data?.kyc_status ? `KYC status: ${t.data.kyc_status}` : 'not permitted'); return; }
     if (!t.ok) { backoff('ticket unavailable'); return; }
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     ws = new WebSocket(`${proto}://${location.host}/ws?symbols=*&ticket=${encodeURIComponent(t.data.ticket)}`);
-    ws.onopen = () => { setState(true, 'live'); retry = 500; };
+    ws.onopen = () => {
+      if (document.querySelector('#toasts [data-tid="feed"]')) toast('ok', 'Live feed reconnected.', { id: 'feed' });
+      wasLive = true;
+      setState(true, upDown ? 'market feed down' : 'live'); retry = 500;
+    };
     ws.onclose = (e) => {
-      if (e.code === 4003) { setState(false, 'access revoked'); locked(e.reason || 'access revoked'); return; }
+      if (e.code === 4003) {
+        toast('err', `Live access revoked: ${e.reason || 'your account is no longer permitted'}.`, { id: 'feed', sticky: true });
+        setState(false, 'access revoked'); locked(e.reason || 'access revoked'); return;
+      }
       backoff('disconnected');
     };
     ws.onmessage = (ev) => {
       let m;
       try { m = JSON.parse(ev.data); } catch { return; }
+      if (m.t === 'welcome' && m.upstream) { upstream(m.upstream, true); return; }
+      if (m.t === 'upstream') { upstream(m, false); return; }
       if (m.t !== 'q') return;
       $('fsize').textContent = ev.data.length.toLocaleString() + ' B';
       const now = Date.now();
@@ -142,7 +171,7 @@
     const now = Date.now();
     for (const tr of rows.values()) {
       const c = tr.cells[8], ts = +c.dataset.ts;
-      if (ts) c.textContent = Math.max(0, Math.round((now - ts) / 1000)) + 's ago';
+      if (ts) c.textContent = ago(now - ts);
     }
   }, 1000);
 
@@ -162,12 +191,13 @@
       r = { ok: false, status: 0 };
     }
     if (sym !== chartSym) return; // user switched symbol while this was in flight
-    if (r.status === 401) { location.href = '/login'; return; }
+    if (r.status === 401) { goLogin(); return; }
     if (r.ok) {
       candles = (r.data.candles || []).map(([ts, o, h, l, c, n]) => ({ ts, o, h, l, c, n }));
       chartMsg = 'No candles yet — history builds one bar per minute.';
     } else if (r.status === 403) {
       candles = []; chartMsg = 'Access revoked — KYC verification required.';
+      toast('err', 'Candles unavailable: access revoked.', { id: 'candles' });
     } else if (!candles.length) {
       chartMsg = `Could not load candles (${r.status ? 'HTTP ' + r.status : 'network error'}); retrying…`;
     } // transient error with data already drawn: keep the last chart

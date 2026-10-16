@@ -77,9 +77,10 @@
     $('k-issue').addEventListener('click', async () => {
       if (k && !confirm('Rotating disconnects any client using the current key. Continue?')) return;
       const r = await api('/api/v1/apikey', { method: 'POST' });
-      if (!r.ok) { showMsg($('key-msg'), false, r.data?.error || 'Failed'); return; }
+      if (!r.ok) { if (r.status) toast('err', errText(r, 'Could not create the API key.')); return; }
       shownSecret = r.data;
       await reload();
+      toast('ok', k ? 'API key rotated. Clients using the old key were disconnected.' : 'API key created. Copy the secret now; it is shown only once.');
     });
     if (shownSecret) {
       const d = shownSecret;
@@ -88,18 +89,37 @@
         <dt>Secret</dt><dd><code>${esc(d.secret)}</code></dd></dl>
         <div class="actions"><button class="btn ghost" type="button" id="copy">Copy secret</button>
         <button class="btn ghost" type="button" id="hide">I have saved it</button></div></div>`;
-      $('copy').addEventListener('click', () => navigator.clipboard?.writeText(d.secret));
+      $('copy').addEventListener('click', async () => {
+        try { await navigator.clipboard.writeText(d.secret); toast('ok', 'Secret copied to clipboard.'); }
+        catch { toast('warn', 'Copy failed. Select the secret and copy it manually.'); }
+      });
       $('hide').addEventListener('click', () => { shownSecret = null; render(); });
     }
     $('k-revoke')?.addEventListener('click', async () => {
       if (!confirm('Revoke this key? Connected clients are disconnected immediately.')) return;
       const r = await api('/api/v1/apikey', { method: 'DELETE' });
-      if (r.ok) { shownSecret = null; await reload(); showMsg($('key-msg'), true, 'Key revoked.'); } else showMsg($('key-msg'), false, r.data?.error || 'Failed');
+      if (r.ok) { shownSecret = null; await reload(); toast('ok', 'API key revoked. Connected clients were disconnected.'); }
+      else if (r.status) toast('err', errText(r, 'Could not revoke the key.'));
     });
   }
 
   function render() { steps(me); profile(me); kyc(me); access(me); }
-  async function reload() { const r = await api('/api/v1/me'); if (r.ok) { me = r.data; render(); } }
+
+  // Tell the merchant when an admin changes their status while the page is open.
+  function announce(prev, next) {
+    if (prev.kyc.status === next.kyc.status && prev.can_trade === next.can_trade) return;
+    const s = next.kyc.status;
+    if (next.can_trade && !prev.can_trade) toast('ok', 'Your KYC was approved. Trading and API keys are now enabled.', { sticky: true });
+    else if (s === 'rejected') toast('err', `Your KYC was rejected${next.kyc.reason ? ': ' + next.kyc.reason : ''}. Please resubmit.`, { sticky: true });
+    else if (s === 'expired') toast('warn', 'Your KYC verification has expired. Resubmit to restore trading.', { sticky: true });
+    else if (s === 'pending' && prev.kyc.status === 'approved') toast('warn', 'An administrator asked you to re-verify your KYC. Trading is paused.', { sticky: true });
+    else if (prev.can_trade && !next.can_trade) toast('warn', 'Trading access has been removed from your account.', { sticky: true });
+  }
+  async function reload() {
+    const r = await api('/api/v1/me');
+    if (r.status === 401) { goLogin(); return; }
+    if (r.ok) { announce(me, r.data); me = r.data; render(); }
+  }
   render();
 
   $('f-kyc').addEventListener('submit', async (e) => {
@@ -111,17 +131,21 @@
     f.append('doc_type', $('k-type').value);
     f.append('doc_number', $('k-num').value);
     if ($('k-doc').files[0]) f.append('document', $('k-doc').files[0]);
+    const btn = $('f-kyc').querySelector('button[type=submit]');
+    btn.disabled = true;
     const r = await api('/api/v1/kyc', { method: 'POST', form: f });
-    if (r.ok) { me = r.data; render(); showMsg($('kyc-msg'), true, 'Submitted. An administrator will review it.'); $('f-kyc').reset(); }
-    else showMsg($('kyc-msg'), false, r.data?.error || 'Submission failed');
+    btn.disabled = false;
+    if (r.ok) { me = r.data; render(); toast('ok', 'KYC submitted. An administrator will review it.'); $('f-kyc').reset(); }
+    else if (r.status) toast('err', errText(r, 'KYC submission failed.'));
   });
 
   $('f-order').addEventListener('submit', async (e) => {
     e.preventDefault();
     const r = await api('/api/v1/orders', { method: 'POST',
       body: { symbol: $('o-sym').value, side: $('o-side').value, qty: Number($('o-qty').value) } });
-    if (r.ok) showMsg($('order-msg'), true, `Filled (simulated): ${r.data.side} ${r.data.qty} ${r.data.symbol} @ ${r.data.price} · ${r.data.order_id}`);
-    else showMsg($('order-msg'), false, `HTTP ${r.status}: ${r.data?.error || 'rejected'}${r.data?.kyc_status ? ' (kyc_status=' + r.data.kyc_status + ')' : ''}`);
+    if (r.ok) toast('ok', `Order filled (simulated): ${r.data.side} ${r.data.qty} ${r.data.symbol} @ ${r.data.price}`);
+    else if (r.status === 403) toast('err', `Order rejected by the server: trading requires approved KYC (your status: ${(r.data?.kyc_status || 'unknown').replace(/_/g, ' ')}).`);
+    else if (r.status) toast('err', errText(r, 'Order rejected.'));
   });
 
   // Status changes made by an admin show up without a reload.

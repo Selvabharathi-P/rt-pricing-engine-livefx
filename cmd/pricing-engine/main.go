@@ -116,6 +116,7 @@ func run() error {
 		URL: cfg.UpstreamURL, APIKey: cfg.APIKey, APISecret: cfg.APISecret, Symbols: cfg.Symbols,
 		AuthTimeout: cfg.AuthTimeout, ReadTimeout: cfg.ReadTimeout,
 	}, ticks, log, m)
+	fc.OnStatus = hub.SetUpstream // tell web clients when the market feed goes up or down
 
 	var pipeline sync.WaitGroup
 	pipeline.Add(2)
