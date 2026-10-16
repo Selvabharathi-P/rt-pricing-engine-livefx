@@ -49,7 +49,7 @@ func newEnv(t *testing.T) *env {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	rc := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { rc.Close() })
-	svc, err := NewService(NewStore(rc), sec, log)
+	svc, err := NewService(NewStore(rc, log), sec, log)
 	if err != nil {
 		t.Fatal(err)
 	}

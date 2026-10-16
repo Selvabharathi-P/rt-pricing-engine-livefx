@@ -55,13 +55,15 @@ flowchart LR
 
 **Try it in the UI:**
 1. Register at `/login`.
-2. On `/account`, look at the "Trading access" card: it says *Locked*. The
-   test-order button answers **403 `kyc_status=not_submitted`**.
+2. On `/account`, look at the "Trading access" card: it says *Locked*, and
+   **Live quotes** shows the locked notice. The server answers
+   **403 `kyc_status=not_submitted`** to the quotes, candles, ticket, API-key
+   and order endpoints.
 3. Submit KYC. The status becomes *pending*.
 4. As admin, open `/admin` → **Review**. You see the decrypted details and a
    notice that the view is audit-logged. Click **Approve**.
 5. As the merchant: generate an API key (the secret is shown once), open
-   **Live quotes**, and place a test order.
+   **Live quotes** and click a row for candles.
 6. As admin, click **Force re-verification**. The merchant's live quotes page
    is cut off immediately, and the API key stops working.
 
@@ -74,7 +76,7 @@ flowchart LR
 | Identity & document checks | Server-side validation: legal name 2–120 chars; date of birth valid and **18+**; ISO-3166 alpha-2 country; document type from an allow-list; document number `^[A-Za-z0-9-]{4,30}$`. Uploads are capped at 2 MB, and the type is detected **from the bytes** (magic numbers), not the filename. Only JPEG, PNG and PDF are accepted, so an `.exe` renamed to `.png` is refused (tested). | `KYCForm.validate`, `SniffDoc` |
 | Status lifecycle | `not_submitted → pending` (merchant) · `pending → approved / rejected` (admin) · `rejected → pending` and `expired → pending` (merchant resubmits) · `approved → expired` (system) · `approved → pending` (admin forces re-review). Any other transition is refused. | `security.Transition` |
 | Who may decide | Only an admin approves or rejects, and never on their own account. Approval requires a validity period (1–3650 days); rejection requires a reason, which is shown to the merchant. Admins cannot submit KYC or trade (separation of duties). | `Transition`, `Service.Review`, `CanTrade` |
-| Preventing unverified trading | Trading actions (`POST /api/v1/orders`, `POST /api/v1/apikey`, WebSocket API-key auth) require `Merchant.CanTrade(now)`. Market data (`/api/v1/quotes`, `/api/v1/candles`, `POST /api/v1/ws-ticket`) requires `CanViewMarket`, which means verified merchants, or admins in read-only mode. Unverified merchants get 403 on all of them. The UI shows the order button to everyone **on purpose**, so the 403 is visibly a server decision. | `security/middleware.go`, `accounts/http.go` |
+| Preventing unverified trading | Trading actions (`POST /api/v1/orders`, `POST /api/v1/apikey`, WebSocket API-key auth) require `Merchant.CanTrade(now)`. Market data (`/api/v1/quotes`, `/api/v1/candles`, `POST /api/v1/ws-ticket`) requires `CanViewMarket`, which means verified merchants, or admins in read-only mode. Unverified merchants get 403 on all of them: UI visibility is cosmetic, and the server decides. | `security/middleware.go`, `accounts/http.go` |
 | Expiry | `EffectiveKYC(now)` treats an approval past `ExpiresAt` as `expired` immediately, without waiting for a cron job. The hub re-checks each connected merchant every 30 s, so a socket opened before expiry is closed after it. | `kyc.go`, `Hub.Revalidate` |
 | Status changes take effect now | Reject, re-verify, disable and key rotation all call `Kick(merchantID)`: every open socket for that merchant gets close code **4003**. Each transition bumps `TokenVersion`, so existing session tokens fail and must refresh, which re-derives the role. | `Service.Review/SetDisabled/IssueAPIKey`, `Hub.Kick` |
 | Audit | `register`, `login`, `login_failed`, `login_throttled`, `kyc_submitted`, `kyc_approve/reject/reverify`, `pii_viewed`, `document_viewed`, `apikey_issued/revoked`, `apikey_auth_failed`, `account_disabled/enabled`, `order_filled` and `refresh_reuse_detected` are all logged, and shown on `/admin`. | `Store.Audit` |

@@ -16,7 +16,26 @@ import (
 
 type ctxKey int
 
-const principalKey ctxKey = 0
+const (
+	principalKey ctxKey = iota
+	requestInfoKey
+)
+
+// RequestInfo is filled in while a request is handled so the access log
+// (which wraps everything) can name the authenticated merchant.
+type RequestInfo struct {
+	ID       string // request ID (X-Request-ID)
+	Merchant string // set once the caller is authenticated
+}
+
+func WithRequestInfo(ctx context.Context, ri *RequestInfo) context.Context {
+	return context.WithValue(ctx, requestInfoKey, ri)
+}
+
+func RequestInfoFrom(ctx context.Context) *RequestInfo {
+	ri, _ := ctx.Value(requestInfoKey).(*RequestInfo)
+	return ri
+}
 
 // Principal is the authenticated caller, loaded fresh from the Directory.
 type Principal struct {
@@ -27,6 +46,9 @@ type Principal struct {
 
 // WithPrincipal attaches p to ctx (for alternative authenticators such as API keys).
 func WithPrincipal(ctx context.Context, p *Principal) context.Context {
+	if ri := RequestInfoFrom(ctx); ri != nil && p.Merchant != nil {
+		ri.Merchant = p.Merchant.ID
+	}
 	return context.WithValue(ctx, principalKey, p)
 }
 
@@ -92,7 +114,7 @@ func Authenticate(tok *Tokens, dir Directory, log *slog.Logger) func(http.Handle
 				return
 			}
 			p := &Principal{Merchant: m, Claims: claims, Role: m.Role(time.Now())}
-			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), principalKey, p)))
+			next.ServeHTTP(w, r.WithContext(WithPrincipal(r.Context(), p)))
 		})
 	}
 }

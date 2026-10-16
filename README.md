@@ -208,7 +208,7 @@ The full permission matrix is in [docs/SECURITY.md](docs/SECURITY.md).
 | **Browser WebSocket uses a single-use 30 s ticket** | The API secret never sits in page JavaScript; the session cookie stays HttpOnly. | One extra request per connect. |
 | **Session state (refresh tokens, revocations, tickets) in memory** | Simple and fast for a single instance. | A restart logs everyone out; multiple replicas would need this moved to Redis. |
 | **Access re-checked continuously:** kick on change, plus a 30 s sweep | A downgrade, disable or KYC expiry cuts live sockets, not just new logins. | Up to 30 s before a pure expiry is noticed on an open socket (admin actions are instant). |
-| **Admins get read-only market data, no trading** | Oversight without breaking separation of duties: the KYC approver can't trade. | Admins can't place test orders; use a verified merchant. |
+| **Admins get read-only market data, no trading** | Oversight without breaking separation of duties: the KYC approver can't trade. | Admins can't place orders or hold API keys; use a verified merchant for that. |
 | **Server-side pagination** (page size 10) | Search and filters cover every record, not just the visible page; per-row lookups run only for the shown page. | The total is computed per request (see the Redis trade-off above). |
 | **Embedded vanilla-JS UI, strict CSP** | No build step, no external assets, served by the same binary; `script-src 'self'` with no inline code. | Hand-written DOM code instead of a component framework. |
 
@@ -363,6 +363,38 @@ That harness was a one-off and is not part of this repo.
 | `COOKIE_SECURE` | `false` | set `true` behind HTTPS |
 | `AUTH_TIMEOUT` / `READ_TIMEOUT` | `10s` / `30s` | |
 | `LOG_LEVEL` | `info` | JSON logs, with secrets redacted |
+
+## Logging
+
+Logs are JSON lines on stdout (`docker compose logs -f pricing-engine`).
+Set the level with `LOG_LEVEL=debug|info|warn|error` (default `info`) in
+`.env`. Secrets are never logged:
+- passwords, tokens, API keys and secrets are redacted by name;
+- `ticket=` values in URLs are redacted;
+- emails are masked as `a***@example.com`.
+
+| Event | Level | Fields |
+|---|---|---|
+| Every HTTP request: API, pages, `/ws` when the socket closes | **INFO** (5xx → **ERROR**) | `req_id` (also sent as `X-Request-ID`), `method`, `path`, `status`, `dur_ms`, `bytes`, `ip`, `merchant` when signed in |
+| Same, plus request details | DEBUG | `query` (redacted), `ua`, `bytes_in` |
+| `/healthz`, `/metrics`, `/static/*`, `/favicon.ico` (polling noise) | DEBUG | as above |
+| Every Redis write of price state (each 1 s flush) | DEBUG | `redis write ok: state flushed` with `symbols`, `buckets`, `deleted`, `dur_ms` |
+| Every Redis write of account data | DEBUG | `redis write ok` with `op` (`create_account`, `update_account`, `put_api_key`, `delete_api_key`, `touch_api_key`, `put_kyc_document`, `append_audit`) and IDs only |
+| Redis persistence summary, once a minute | **INFO** | `flushes_ok`, `buckets_written`, `buckets_deleted`, `errors`, `avg_ms` |
+| Redis write failed / recovered | WARN / **INFO** | `op` or `after_failed_flushes`, `err` |
+| Pipeline summary, once a minute | **INFO** | `upstream_connected`, `upstream_frames`, `ticks`, `duplicates`, `out_of_order`, `rejected`, `ws_clients`, `ws_frames_sent` |
+| Security / audit events (login, KYC decisions, key issue/revoke, orders, PII views) | **INFO** (failures, lockouts, token reuse → **WARN**) | `audit: <action>`, `actor` (masked), `target`, `detail` |
+| WebSocket login | **INFO** / WARN on rejection | `merchant`, `via` (`api_key` or `ticket`), `remote` / `reason` |
+| WebSocket connect, subscribe, disconnect | DEBUG | `merchant`, `symbols`, `session_s`, `frames_sent` |
+| Upstream feed: authenticated, subscribed, reconnecting, session busy | INFO / WARN / ERROR | `err`, `retry_in` |
+
+Example (INFO):
+
+```json
+{"level":"INFO","msg":"http request","req_id":"b25e070b83ce6b96","method":"GET","path":"/api/v1/admin/merchants","status":200,"dur_ms":3.975,"bytes":4284,"ip":"172.25.0.1","merchant":"m_FH4LMJFrmDfO"}
+{"level":"WARN","msg":"audit: login_failed","actor":"a***@example.com","target":"","detail":"ip=172.25.0.1"}
+{"level":"INFO","msg":"redis persistence summary","window":"1m0s","flushes_ok":60,"buckets_written":2954,"buckets_deleted":50,"errors":0,"avg_ms":0.8}
+```
 
 ## Project layout
 

@@ -87,7 +87,7 @@ func run() error {
 	}
 	acctRedis := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr, Password: cfg.RedisPassword, DB: cfg.RedisDB})
 	defer acctRedis.Close()
-	svc, err := accounts.NewService(accounts.NewStore(acctRedis), secrets, log)
+	svc, err := accounts.NewService(accounts.NewStore(acctRedis, log), secrets, log)
 	if err != nil {
 		return err
 	}
@@ -123,6 +123,7 @@ func run() error {
 	go func() { defer pipeline.Done(); fc.Run(ctx) }()
 	go func() { defer pipeline.Done(); process(ctx, ticks, eng, hub, m) }()
 	go hub.Revalidate(ctx)
+	go pipelineSummary(ctx, m, log)
 
 	// The flusher outlives the pipeline so its final flush sees every tick.
 	flushCtx, stopFlush := context.WithCancel(context.Background())
@@ -136,7 +137,7 @@ func run() error {
 	api.Register(mux)
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr,
-		Handler:           mux,
+		Handler:           server.AccessLog(log, mux),
 		ReadHeaderTimeout: 5 * time.Second,
 		MaxHeaderBytes:    16 << 10,
 	}
@@ -196,6 +197,30 @@ func randomPassword() string {
 		b[i] = alphabet[int(b[i])%len(alphabet)]
 	}
 	return string(b)
+}
+
+// pipelineSummary writes one INFO line per minute describing the price
+// pipeline (deltas since the last line), so INFO logs show the system is
+// alive and healthy without a line per tick.
+func pipelineSummary(ctx context.Context, m *metrics.Set, log *slog.Logger) {
+	t := time.NewTicker(time.Minute)
+	defer t.Stop()
+	var last [6]uint64
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			cur := [6]uint64{m.UpstreamFrames.Value(), m.TicksTotal.Value(), m.DuplicatesTotal.Value(),
+				m.OutOfOrderTotal.Value(), m.RejectedTotal.Value(), m.WSFramesTotal.Value()}
+			log.Info("pipeline summary", "window", "1m",
+				"upstream_connected", m.UpstreamUp.Value() == 1,
+				"upstream_frames", cur[0]-last[0], "ticks", cur[1]-last[1], "duplicates", cur[2]-last[2],
+				"out_of_order", cur[3]-last[3], "rejected", cur[4]-last[4],
+				"ws_clients", m.WSClients.Value(), "ws_frames_sent", cur[5]-last[5])
+			last = cur
+		}
+	}
 }
 
 func process(ctx context.Context, in <-chan []model.Tick, eng *engine.Engine, hub *server.Hub, m *metrics.Set) {

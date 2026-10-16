@@ -19,6 +19,7 @@ import (
 	"pricing-engine/internal/engine"
 	"pricing-engine/internal/metrics"
 	"pricing-engine/internal/model"
+	"pricing-engine/internal/security"
 )
 
 type Options struct {
@@ -195,6 +196,9 @@ func (h *Hub) bind(c *Client, id Identity) bool {
 	set[c] = struct{}{}
 	c.merchantID, c.email = id.ID, id.Email
 	c.authed.Store(true)
+	if c.reqInfo != nil {
+		c.reqInfo.Merchant = id.ID // shown on the /ws access-log line
+	}
 	return true
 }
 
@@ -435,18 +439,22 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 		// queue overflow, is what stops a chatty client.
 		notify: make(chan struct{}, 1), ctrl: make(chan []byte, 2*h.opts.MsgBurst+8), done: make(chan struct{}),
 		subs: make(map[string]struct{}), lim: rate.NewLimiter(h.opts.MsgRate, h.opts.MsgBurst),
-		remote: r.RemoteAddr, connectedAt: time.Now(),
+		remote: r.RemoteAddr, connectedAt: time.Now(), reqInfo: security.RequestInfoFrom(r.Context()),
 	}
+	h.log.Debug("ws connected", "remote", c.remote, "format", map[bool]string{true: "binary", false: "json"}[c.binary])
 	h.mu.Lock()
 	h.clients[c] = struct{}{}
 	h.mu.Unlock()
 	go c.writeLoop()
 	if !h.opts.RequireAuth {
 		c.authed.Store(true)
-	} else if ticketID != nil && !h.bind(c, *ticketID) {
-		c.kick(CloseTooMany, "too many sessions for this merchant")
-		c.readLoop()
-		return
+	} else if ticketID != nil {
+		if !h.bind(c, *ticketID) {
+			c.kick(CloseTooMany, "too many sessions for this merchant")
+			c.readLoop()
+			return
+		}
+		h.log.Info("ws authenticated", "merchant", ticketID.ID, "via", "ticket", "remote", c.remote)
 	}
 	c.sendCtrl(map[string]any{"t": "welcome", "fields": JSONFields, "symbols": h.eng.Symbols(),
 		"format": map[bool]string{true: "binary", false: "json"}[c.binary], "auth_required": !c.authed.Load(),
@@ -510,6 +518,7 @@ type Client struct {
 	connectedAt time.Time
 	frames      atomic.Uint64
 	deferred    []string // ?symbols= waiting for authentication
+	reqInfo     *security.RequestInfo
 }
 
 // stage queues quotes for the writer without waking it. It reports whether
@@ -559,6 +568,8 @@ func (c *Client) sendCtrl(v any) {
 
 func (c *Client) close() {
 	c.once.Do(func() {
+		c.h.log.Debug("ws disconnected", "merchant", c.merchantID, "remote", c.remote,
+			"session_s", time.Since(c.connectedAt).Round(time.Second).Seconds(), "frames_sent", c.frames.Load())
 		close(c.done)
 		c.conn.Close()
 		c.h.remove(c)
@@ -721,6 +732,7 @@ func (c *Client) handle(cmd command) {
 			c.sendCtrl(map[string]any{"t": "unsubscribed", "symbols": orAll(syms)})
 			return
 		}
+		c.h.log.Debug("ws subscribe", "merchant", c.merchantID, "symbols", orAll(syms))
 		snap := c.h.subscribe(c, syms)
 		c.sendCtrl(map[string]any{"t": "subscribed", "symbols": orAll(syms)})
 		if snap == nil || len(snap) > 0 {
@@ -752,6 +764,7 @@ func (c *Client) authenticate(cmd command) {
 		if errors.Is(err, ErrNotPermitted) {
 			code, msg = CloseForbidden, "trading not permitted: KYC verification required"
 		}
+		h.log.Warn("ws auth rejected", "remote", c.remote, "reason", msg)
 		c.sendCtrl(map[string]string{"t": "error", "msg": msg})
 		c.kick(code, msg)
 		return
@@ -761,6 +774,7 @@ func (c *Client) authenticate(cmd command) {
 		c.kick(CloseTooMany, "too many sessions")
 		return
 	}
+	h.log.Info("ws authenticated", "merchant", id.ID, "via", "api_key", "remote", c.remote)
 	c.sendCtrl(map[string]any{"t": "authenticated", "merchant": id.Email})
 	c.subscribeDeferred()
 }

@@ -139,15 +139,6 @@
     else if (r.status) toast('err', errText(r, 'KYC submission failed.'));
   });
 
-  $('f-order').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const r = await api('/api/v1/orders', { method: 'POST',
-      body: { symbol: $('o-sym').value, side: $('o-side').value, qty: Number($('o-qty').value) } });
-    if (r.ok) toast('ok', `Order filled (simulated): ${r.data.side} ${r.data.qty} ${r.data.symbol} @ ${r.data.price}`);
-    else if (r.status === 403) toast('err', `Order rejected by the server: trading requires approved KYC (your status: ${(r.data?.kyc_status || 'unknown').replace(/_/g, ' ')}).`);
-    else if (r.status) toast('err', errText(r, 'Order rejected.'));
-  });
-
   // Status changes made by an admin show up without a reload.
   setInterval(reload, 15000);
 })();

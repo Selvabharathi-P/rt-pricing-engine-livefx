@@ -9,7 +9,7 @@ import (
 // sensitiveKeys are attribute names whose values must never reach logs.
 var sensitiveKeys = []string{
 	"password", "passwd", "secret", "api_key", "apikey", "token", "authorization",
-	"cookie", "session", "document", "passport", "national_id", "tax_id", "ssn", "dob", "iban", "account_number",
+	"cookie", "session", "ticket", "document", "passport", "national_id", "tax_id", "ssn", "dob", "iban", "account_number",
 }
 
 func isSensitive(key string) bool {

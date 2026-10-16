@@ -93,20 +93,54 @@ type Flusher struct {
 	Metrics  *metrics.Set
 
 	pend map[string]*pending
+
+	// per-minute summary (INFO) and failure streak tracking
+	sumFlushes, sumBuckets, sumDeleted, sumErrors int
+	sumDur                                        time.Duration
+	failStreak                                    int
+}
+
+const summaryEvery = time.Minute
+
+func (f *Flusher) logger() *slog.Logger {
+	if f.Log == nil {
+		return slog.New(slog.DiscardHandler)
+	}
+	return f.Log
+}
+
+// summary logs one INFO line per minute about Redis persistence, so the
+// INFO log shows that writes are succeeding without a line per second.
+func (f *Flusher) summary() {
+	if f.sumFlushes == 0 && f.sumErrors == 0 {
+		return
+	}
+	avg := 0.0
+	if f.sumFlushes > 0 {
+		avg = float64(f.sumDur.Microseconds()) / 1000 / float64(f.sumFlushes)
+	}
+	f.logger().Info("redis persistence summary", "window", summaryEvery.String(), "flushes_ok", f.sumFlushes,
+		"buckets_written", f.sumBuckets, "buckets_deleted", f.sumDeleted, "errors", f.sumErrors, "avg_ms", avg)
+	f.sumFlushes, f.sumBuckets, f.sumDeleted, f.sumErrors, f.sumDur = 0, 0, 0, 0, 0
 }
 
 func (f *Flusher) Run(ctx context.Context) {
 	t := time.NewTicker(f.Interval)
 	defer t.Stop()
+	sum := time.NewTicker(summaryEvery)
+	defer sum.Stop()
 	for {
 		select {
+		case <-sum.C:
+			f.summary()
 		case <-ctx.Done():
 			// Final flush on shutdown, with its own deadline.
 			fctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			if err := f.Flush(fctx); err != nil {
-				f.Log.Error("final state flush failed", "err", err)
+				f.logger().Error("final state flush failed", "err", err)
 			} else {
-				f.Log.Info("final state flush complete")
+				f.logger().Info("final state flush complete")
+				f.summary()
 			}
 			cancel()
 			return
@@ -114,7 +148,7 @@ func (f *Flusher) Run(ctx context.Context) {
 			// Bounded so a hung store can't stall flushing indefinitely.
 			fctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			if err := f.Flush(fctx); err != nil && ctx.Err() == nil {
-				f.Log.Warn("state flush failed; will retry", "err", err)
+				f.logger().Warn("state flush failed; will retry", "err", err)
 			}
 			cancel()
 		}
@@ -158,12 +192,30 @@ func (f *Flusher) Flush(ctx context.Context) error {
 		}
 		deltas = append(deltas, d)
 	}
+	nb, nd := 0, 0
+	for _, d := range deltas {
+		nb += len(d.Buckets)
+		nd += len(d.Deleted)
+	}
 	start := time.Now()
 	if err := f.Store.Save(ctx, deltas); err != nil {
 		f.Metrics.StoreFlushErrors.Inc()
+		f.sumErrors++
+		f.failStreak++
 		return err
 	}
-	f.Metrics.StoreFlushTime.Observe(time.Since(start).Seconds())
+	dur := time.Since(start)
+	f.Metrics.StoreFlushTime.Observe(dur.Seconds())
+	f.sumFlushes++
+	f.sumBuckets += nb
+	f.sumDeleted += nd
+	f.sumDur += dur
+	if f.failStreak > 0 {
+		f.logger().Info("redis writes recovered", "after_failed_flushes", f.failStreak, "buckets_written", nb)
+		f.failStreak = 0
+	}
+	f.logger().Debug("redis write ok: state flushed", "symbols", len(deltas), "buckets", nb, "deleted", nd,
+		"dur_ms", float64(dur.Microseconds())/1000)
 	clear(f.pend)
 	return nil
 }

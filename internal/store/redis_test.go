@@ -1,11 +1,17 @@
 package store
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"log/slog"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/alicebob/miniredis/v2"
 
+	"pricing-engine/internal/metrics"
 	"pricing-engine/internal/model"
 )
 
@@ -84,5 +90,33 @@ func TestRedisNamespaceIsolation(t *testing.T) {
 	got, err := live.Load(ctx, []string{"EURUSD"})
 	if err != nil || len(got) != 0 {
 		t.Fatalf("live run restored simulator data: %v %v", got, err)
+	}
+}
+
+func TestFlusherLogsWrites(t *testing.T) {
+	var buf bytes.Buffer
+	log := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	st := NewMem()
+	n := 0
+	f := &Flusher{Store: st, Log: log, Metrics: metrics.NewSet(), Interval: time.Second,
+		Source: func() []model.Delta {
+			n++
+			return []model.Delta{{Symbol: "EURUSD", Buckets: []model.Bucket{{Minute: int64(n), Count: 1}}}}
+		}}
+	st.FailSave = errors.New("redis down")
+	if f.Flush(context.Background()) == nil {
+		t.Fatal("expected failure")
+	}
+	st.FailSave = nil
+	if err := f.Flush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	f.summary()
+	out := buf.String()
+	for _, want := range []string{`"msg":"redis writes recovered"`, `"after_failed_flushes":1`, `"msg":"redis write ok: state flushed"`,
+		`"buckets":2`, `"msg":"redis persistence summary"`, `"flushes_ok":1`, `"errors":1`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("log missing %s\n%s", want, out)
+		}
 	}
 }

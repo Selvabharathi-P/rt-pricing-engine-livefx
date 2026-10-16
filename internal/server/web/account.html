@@ -46,16 +46,6 @@
     <div id="access"></div>
   </section>
 
-  <section class="card">
-    <h2>Place a test order</h2>
-    <p class="small muted">Simulated fill at the live price. The button is shown to everyone on purpose: the <b>server</b> decides, and answers 403 unless your KYC is approved.</p>
-    <form id="f-order" class="row">
-      <div><label for="o-sym">Symbol</label><input id="o-sym" value="EURUSD" required></div>
-      <div><label for="o-side">Side</label><select id="o-side"><option>buy</option><option>sell</option></select></div>
-      <div><label for="o-qty">Quantity</label><input id="o-qty" type="number" value="1000" min="1" step="any" required></div>
-      <div><label>&nbsp;</label><button class="btn" type="submit">Place order</button></div>
-    </form>
-  </section>
 </main>
 <script src="/static/app.js"></script>
 <script src="/static/account.js"></script>
