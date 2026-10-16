@@ -49,7 +49,7 @@ func TestAccessLog(t *testing.T) {
 	for _, level := range []slog.Level{slog.LevelInfo, slog.LevelDebug} {
 		buf := &syncBuf{}
 		log := slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: level}))
-		srv := httptest.NewServer(AccessLog(log, Routes(h.hub, h.eng, h.m, func(context.Context) (bool, error) { return true, nil }, nil)))
+		srv := httptest.NewServer(AccessLog(log, h.m, Routes(h.hub, h.eng, h.m, func(context.Context) (bool, error) { return true, nil }, nil)))
 		resp, _ := http.Get(srv.URL + "/api/v1/quotes?symbols=EURUSD")
 		resp.Body.Close()
 		reqID := resp.Header.Get("X-Request-ID")
@@ -103,7 +103,7 @@ func TestAccessLog(t *testing.T) {
 func TestRequestIDPassThrough(t *testing.T) {
 	buf := &syncBuf{}
 	log := slog.New(slog.NewJSONHandler(buf, nil))
-	h := AccessLog(log, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	h := AccessLog(log, nil, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
 	for in, keep := range map[string]bool{"abc-123": true, "<script>": false, strings.Repeat("a", 65): false} {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest("GET", "/x", nil)
