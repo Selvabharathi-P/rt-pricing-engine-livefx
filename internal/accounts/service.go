@@ -74,6 +74,21 @@ func normEmail(e string) string { return strings.ToLower(strings.TrimSpace(e)) }
 
 func (s *Service) audit(ctx context.Context, actor, action, target, detail string) {
 	s.store.Audit(ctx, AuditEvent{TS: s.now(), Actor: actor, Action: action, Target: target, Detail: detail})
+	// Security events are always worth an INFO line (failures at WARN).
+	lvl := slog.LevelInfo
+	if strings.HasSuffix(action, "_failed") || strings.HasSuffix(action, "_throttled") || strings.HasSuffix(action, "_detected") {
+		lvl = slog.LevelWarn
+	}
+	s.log.Log(ctx, lvl, "audit: "+action, "actor", maskEmail(actor), "target", target, "detail", detail)
+}
+
+// maskEmail keeps logs useful without writing full addresses: a***@example.com
+func maskEmail(s string) string {
+	at := strings.IndexByte(s, '@')
+	if at <= 0 {
+		return s
+	}
+	return s[:1] + "***" + s[at:]
 }
 
 // Merchant implements security.Directory: the source of truth for every

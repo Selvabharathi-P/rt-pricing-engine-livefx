@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -33,9 +34,28 @@ const (
 
 var ErrEmailTaken = errors.New("email already registered")
 
-type Store struct{ c *redis.Client }
+type Store struct {
+	c   *redis.Client
+	log *slog.Logger
+}
 
-func NewStore(c *redis.Client) *Store { return &Store{c: c} }
+// NewStore logs every successful write at DEBUG and every failed write at
+// WARN. Only IDs are logged, never emails, hashes or KYC values.
+func NewStore(c *redis.Client, log *slog.Logger) *Store {
+	if log == nil {
+		log = slog.New(slog.DiscardHandler)
+	}
+	return &Store{c: c, log: log}
+}
+
+func (s *Store) wrote(op string, err error, attrs ...any) error {
+	if err != nil {
+		s.log.Warn("redis write failed", append([]any{"op", op, "err", err}, attrs...)...)
+	} else {
+		s.log.Debug("redis write ok", append([]any{"op", op}, attrs...)...)
+	}
+	return err
+}
 
 func (s *Store) Create(ctx context.Context, a *Account) error {
 	b, err := json.Marshal(a)
@@ -54,7 +74,7 @@ func (s *Store) Create(ctx context.Context, a *Account) error {
 		p.SAdd(ctx, kIDs, a.ID)
 		return nil
 	})
-	return err
+	return s.wrote("create_account", err, "account", a.ID)
 }
 
 func (s *Store) Put(ctx context.Context, a *Account) error {
@@ -62,7 +82,7 @@ func (s *Store) Put(ctx context.Context, a *Account) error {
 	if err != nil {
 		return err
 	}
-	return s.c.Set(ctx, kAccount+a.ID, b, 0).Err()
+	return s.wrote("update_account", s.c.Set(ctx, kAccount+a.ID, b, 0).Err(), "account", a.ID, "bytes", len(b))
 }
 
 func (s *Store) Get(ctx context.Context, id string) (*Account, error) {
@@ -125,7 +145,7 @@ func (s *Store) PutKey(ctx context.Context, k *APIKey) error {
 		p.Set(ctx, kMerchKey+k.MerchantID, k.ID, 0)
 		return nil
 	})
-	return err
+	return s.wrote("put_api_key", err, "account", k.MerchantID, "key_id", k.ID)
 }
 
 func (s *Store) GetKey(ctx context.Context, id string) (*APIKey, error) {
@@ -164,18 +184,18 @@ func (s *Store) DeleteKeyFor(ctx context.Context, merchantID string) error {
 	if err != nil {
 		return err
 	}
-	return s.c.Del(ctx, kKey+id, kMerchKey+merchantID).Err()
+	return s.wrote("delete_api_key", s.c.Del(ctx, kKey+id, kMerchKey+merchantID).Err(), "account", merchantID, "key_id", id)
 }
 
 func (s *Store) TouchKey(ctx context.Context, k *APIKey, at time.Time) {
 	k.LastUsedAt = at
 	if b, err := json.Marshal(k); err == nil {
-		s.c.Set(ctx, kKey+k.ID, b, 0)
+		s.wrote("touch_api_key", s.c.Set(ctx, kKey+k.ID, b, 0).Err(), "key_id", k.ID)
 	}
 }
 
 func (s *Store) PutDoc(ctx context.Context, id string, ct []byte) error {
-	return s.c.Set(ctx, kDoc+id, ct, 0).Err()
+	return s.wrote("put_kyc_document", s.c.Set(ctx, kDoc+id, ct, 0).Err(), "account", id, "bytes", len(ct))
 }
 
 func (s *Store) GetDoc(ctx context.Context, id string) ([]byte, error) {
@@ -188,11 +208,12 @@ func (s *Store) GetDoc(ctx context.Context, id string) ([]byte, error) {
 
 func (s *Store) Audit(ctx context.Context, e AuditEvent) {
 	b, _ := json.Marshal(e)
-	s.c.TxPipelined(ctx, func(p redis.Pipeliner) error {
+	_, err := s.c.TxPipelined(ctx, func(p redis.Pipeliner) error {
 		p.LPush(ctx, kAudit, b)
 		p.LTrim(ctx, kAudit, 0, auditCap-1)
 		return nil
 	})
+	s.wrote("append_audit", err, "action", e.Action)
 }
 
 // AuditPage returns events [offset, offset+n) newest first, plus the total.
