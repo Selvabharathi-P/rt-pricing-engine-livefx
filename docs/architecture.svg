@@ -1,0 +1,147 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1290 660" width="1290" height="660" font-family="Segoe UI, system-ui, -apple-system, Roboto, sans-serif">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#334155"/>
+    </marker>
+    <marker id="g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#059669"/>
+    </marker>
+    <style>
+      .t  { font-size: 15px; font-weight: 700; fill: #0f172a; }
+      .s  { font-size: 12.5px; fill: #334155; }
+      .n  { font-size: 13px; font-weight: 700; fill: #ffffff; }
+      .lbl{ font-size: 12px; fill: #334155; }
+      .box { stroke-width: 1.6; }
+      .hot { fill: #fff7ed; stroke: #ea580c; }
+      .ctl { fill: #ffffff; stroke: #475569; }
+      .ext { fill: #eef2ff; stroke: #6366f1; }
+      .db  { fill: #ecfdf5; stroke: #059669; }
+      .ln  { stroke: #334155; stroke-width: 1.8; fill: none; }
+      .lnd { stroke: #334155; stroke-width: 1.6; fill: none; stroke-dasharray: 6 5; }
+      .lng { stroke: #059669; stroke-width: 1.8; fill: none; }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="1290" height="660" fill="#ffffff"/>
+
+  <!-- service boundary -->
+  <rect x="240" y="64" width="760" height="400" rx="14" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.4" stroke-dasharray="8 6"/>
+  <text x="258" y="90" font-size="13" font-weight="700" fill="#475569">pricing-engine · single Go service</text>
+  <text x="982" y="90" font-size="12" fill="#ea580c" text-anchor="end">orange = hot path (every tick)</text>
+
+  <!-- upstream -->
+  <g>
+    <path class="box ext" d="M20,132 a75,12 0 0,1 150,0 v76 a75,12 0 0,1 -150,0 z"/>
+    <path d="M20,132 a75,12 0 0,0 150,0" fill="none" stroke="#6366f1" stroke-width="1.6"/>
+    <text class="t" x="95" y="172" text-anchor="middle">LiveFXHub</text>
+    <text class="s" x="95" y="192" text-anchor="middle">upstream feed</text>
+  </g>
+
+  <!-- row 1: hot path -->
+  <rect class="box hot" x="270" y="120" width="180" height="100" rx="10"/>
+  <text class="t" x="360" y="150" text-anchor="middle">Feed client</text>
+  <text class="s" x="360" y="172" text-anchor="middle">auth · subscribe</text>
+  <text class="s" x="360" y="190" text-anchor="middle">reconnect · parse</text>
+  <text class="s" x="360" y="208" text-anchor="middle">bid/ask → buy/sell</text>
+
+  <rect class="box hot" x="530" y="120" width="180" height="100" rx="10"/>
+  <text class="t" x="620" y="150" text-anchor="middle">Pricing engine</text>
+  <text class="s" x="620" y="172" text-anchor="middle">drop duplicates</text>
+  <text class="s" x="620" y="190" text-anchor="middle">place late ticks</text>
+  <text class="s" x="620" y="208" text-anchor="middle">rolling 24h high/low/%</text>
+
+  <rect class="box hot" x="790" y="112" width="190" height="116" rx="10"/>
+  <text class="t" x="885" y="140" text-anchor="middle">Server</text>
+  <text class="s" x="885" y="162" text-anchor="middle">WebSocket: auth ·</text>
+  <text class="s" x="885" y="179" text-anchor="middle">subscriptions · frames &lt;10 KB</text>
+  <text class="s" x="885" y="199" text-anchor="middle">HTTP: quotes · candles ·</text>
+  <text class="s" x="885" y="216" text-anchor="middle">orders · KYC · admin UI</text>
+
+  <!-- clients -->
+  <rect class="box ext" x="1080" y="104" width="190" height="132" rx="22"/>
+  <text class="t" x="1175" y="138" text-anchor="middle">Clients</text>
+  <text class="s" x="1175" y="162" text-anchor="middle">merchant apps</text>
+  <text class="s" x="1175" y="179" text-anchor="middle">(API key + secret)</text>
+  <text class="s" x="1175" y="203" text-anchor="middle">browsers</text>
+  <text class="s" x="1175" y="220" text-anchor="middle">(merchant · admin)</text>
+
+  <!-- row 2 -->
+  <rect class="box ctl" x="270" y="336" width="180" height="96" rx="10"/>
+  <text class="t" x="360" y="368" text-anchor="middle">Flusher</text>
+  <text class="s" x="360" y="390" text-anchor="middle">every 1 s: changed</text>
+  <text class="s" x="360" y="408" text-anchor="middle">buckets + last prices</text>
+
+  <rect class="box ctl" x="790" y="336" width="190" height="96" rx="10"/>
+  <text class="t" x="885" y="366" text-anchor="middle">Accounts &amp; security</text>
+  <text class="s" x="885" y="388" text-anchor="middle">KYC · roles · API keys</text>
+  <text class="s" x="885" y="406" text-anchor="middle">sessions · audit log</text>
+  <text class="s" x="885" y="424" text-anchor="middle">rate limits</text>
+
+  <!-- row 3: storage -->
+  <g>
+    <path class="box db" d="M270,528 a220,13 0 0,1 440,0 v68 a220,13 0 0,1 -440,0 z"/>
+    <path d="M270,528 a220,13 0 0,0 440,0" fill="none" stroke="#059669" stroke-width="1.6"/>
+    <text class="t" x="490" y="566" text-anchor="middle">Redis</text>
+    <text class="s" x="490" y="586" text-anchor="middle">price history (1-min buckets) · accounts · KYC (encrypted) · audit</text>
+  </g>
+  <g>
+    <path class="box db" d="M790,528 a95,13 0 0,1 190,0 v68 a95,13 0 0,1 -190,0 z"/>
+    <path d="M790,528 a95,13 0 0,0 190,0" fill="none" stroke="#059669" stroke-width="1.6"/>
+    <text class="t" x="885" y="566" text-anchor="middle">Secrets volume</text>
+    <text class="s" x="885" y="586" text-anchor="middle">signing + encryption keys</text>
+  </g>
+
+  <!-- ① upstream -> feed -->
+  <line class="ln" x1="170" y1="170" x2="268" y2="170" marker-end="url(#a)"/>
+  <!-- ② feed -> engine -->
+  <line class="ln" x1="450" y1="170" x2="528" y2="170" marker-end="url(#a)"/>
+  <!-- ③ engine -> server (changed quotes) -->
+  <line class="ln" x1="710" y1="152" x2="788" y2="152" marker-end="url(#a)"/>
+  <!-- ⑤b server -> engine (reads) -->
+  <line class="lnd" x1="790" y1="192" x2="712" y2="192" marker-end="url(#a)"/>
+  <!-- ④ server -> clients -->
+  <line class="ln" x1="980" y1="148" x2="1078" y2="148" marker-end="url(#a)"/>
+  <!-- ⑤ clients -> server -->
+  <line class="ln" x1="1080" y1="196" x2="982" y2="196" marker-end="url(#a)"/>
+  <!-- ⑥ server <-> accounts -->
+  <line class="ln" x1="885" y1="230" x2="885" y2="334" marker-start="url(#a)" marker-end="url(#a)"/>
+  <!-- ⑦ engine -> flusher -> redis -->
+  <line class="lng" x1="580" y1="222" x2="420" y2="334" marker-end="url(#g)"/>
+  <line class="lng" x1="360" y1="432" x2="360" y2="514" marker-end="url(#g)"/>
+  <!-- ⑧ redis -> engine (restore on start) -->
+  <line class="lnd" x1="640" y1="516" x2="640" y2="223" marker-end="url(#a)"/>
+  <!-- ⑨ accounts <-> redis, accounts <- keys -->
+  <line class="ln" x1="800" y1="432" x2="700" y2="520" marker-start="url(#a)" marker-end="url(#a)"/>
+  <line class="lnd" x1="885" y1="514" x2="885" y2="434" marker-end="url(#a)"/>
+
+  <!-- step numbers -->
+  <g>
+    <circle cx="219" cy="152" r="11" fill="#ea580c"/><text class="n" x="219" y="157" text-anchor="middle">1</text>
+    <circle cx="489" cy="152" r="11" fill="#ea580c"/><text class="n" x="489" y="157" text-anchor="middle">2</text>
+    <circle cx="749" cy="134" r="11" fill="#ea580c"/><text class="n" x="749" y="139" text-anchor="middle">3</text>
+    <circle cx="1029" cy="130" r="11" fill="#ea580c"/><text class="n" x="1029" y="135" text-anchor="middle">4</text>
+    <circle cx="1029" cy="214" r="11" fill="#475569"/><text class="n" x="1029" y="219" text-anchor="middle">5</text>
+    <circle cx="749" cy="210" r="11" fill="#475569"/><text class="n" x="749" y="215" text-anchor="middle">5</text>
+    <circle cx="905" cy="282" r="11" fill="#475569"/><text class="n" x="905" y="287" text-anchor="middle">6</text>
+    <circle cx="486" cy="268" r="11" fill="#059669"/><text class="n" x="486" y="273" text-anchor="middle">7</text>
+    <circle cx="380" cy="474" r="11" fill="#059669"/><text class="n" x="380" y="479" text-anchor="middle">7</text>
+    <circle cx="660" cy="300" r="11" fill="#475569"/><text class="n" x="660" y="305" text-anchor="middle">8</text>
+    <circle cx="738" cy="462" r="11" fill="#475569"/><text class="n" x="738" y="467" text-anchor="middle">9</text>
+  </g>
+
+  <!-- short edge labels -->
+  <text class="lbl" x="219" y="190" text-anchor="middle">ticks</text>
+  <text class="lbl" x="1029" y="168" text-anchor="middle">live quotes</text>
+  <text class="lbl" x="1029" y="242" text-anchor="middle">auth · HTTPS</text>
+  <text class="lbl" x="905" y="306" text-anchor="start" dx="16">check key / KYC</text>
+  <text class="lbl" x="905" y="322" text-anchor="start" dx="16">· kick on revoke</text>
+  <text class="lbl" x="660" y="322" text-anchor="start" dx="16">restore on start</text>
+  <text class="lbl" x="903" y="490" text-anchor="start">keys</text>
+
+  <!-- legend -->
+  <g font-size="12" fill="#334155">
+    <line class="ln" x1="20" y1="636" x2="56" y2="636" marker-end="url(#a)"/><text x="64" y="640">data flow</text>
+    <line class="lnd" x1="150" y1="636" x2="186" y2="636" marker-end="url(#a)"/><text x="194" y="640">read / on demand</text>
+    <line class="lng" x1="320" y1="636" x2="356" y2="636" marker-end="url(#g)"/><text x="364" y="640">persistence</text>
+  </g>
+</svg>

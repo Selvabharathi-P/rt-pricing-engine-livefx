@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign In</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="top"><h1>Pricing Engine</h1></header>
+<main>
+  <div class="center card">
+    <div class="tabs">
+      <button type="button" class="btn" id="tab-login">Log in</button>
+      <button type="button" class="btn ghost" id="tab-register">Create merchant account</button>
+    </div>
+
+    <form id="f-login" autocomplete="on">
+      <label for="l-email">Email</label>
+      <input id="l-email" type="email" required autocomplete="username">
+      <label for="l-pass">Password</label>
+      <input id="l-pass" type="password" required autocomplete="current-password">
+      <div class="actions"><button class="btn" type="submit">Log in</button></div>
+    </form>
+
+    <form id="f-register" class="hidden" autocomplete="on">
+      <label for="r-name">Business / contact name</label>
+      <input id="r-name" required maxlength="100" autocomplete="organization">
+      <label for="r-email">Email</label>
+      <input id="r-email" type="email" required autocomplete="username">
+      <label for="r-pass">Password (12–128 characters)</label>
+      <input id="r-pass" type="password" required minlength="12" maxlength="128" autocomplete="new-password">
+      <p class="small muted">New accounts start as <b>unverified merchants</b>: you can log in and submit KYC, but trading and API keys unlock only after an admin approves your KYC.</p>
+      <div class="actions"><button class="btn" type="submit">Create account</button></div>
+    </form>
+    <div id="msg" class="msg"></div>
+  </div>
+</main>
+<script src="/static/app.js"></script>
+<script src="/static/login.js"></script>
+</body>
+</html>

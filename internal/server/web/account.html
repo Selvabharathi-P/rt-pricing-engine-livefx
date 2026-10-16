@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>My Account</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="top"></header>
+<main>
+  <div class="steps" id="steps"></div>
+
+  <div class="grid2">
+    <section class="card">
+      <h2>Profile</h2>
+      <dl class="kv" id="profile"></dl>
+    </section>
+
+    <section class="card">
+      <h2>KYC verification</h2>
+      <div id="kyc-status"></div>
+      <form id="f-kyc" class="hidden">
+        <h3>Submit identity details</h3>
+        <label for="k-name">Legal name</label>
+        <input id="k-name" required maxlength="120">
+        <div class="row">
+          <div><label for="k-dob">Date of birth</label><input id="k-dob" type="date" required></div>
+          <div><label for="k-country">Country (2-letter)</label><input id="k-country" required maxlength="2" placeholder="IN"></div>
+        </div>
+        <div class="row">
+          <div><label for="k-type">Document type</label>
+            <select id="k-type"><option value="passport">Passport</option><option value="national_id">National ID</option><option value="driving_licence">Driving licence</option></select></div>
+          <div><label for="k-num">Document number</label><input id="k-num" required maxlength="30" pattern="[A-Za-z0-9-]{4,30}"></div>
+        </div>
+        <label for="k-doc">Document scan (JPEG, PNG or PDF, max 2 MB, optional)</label>
+        <input id="k-doc" type="file" accept="image/jpeg,image/png,application/pdf">
+        <p class="small muted">Name, date of birth, document number and the scan are encrypted (AES-256-GCM) before storage and are visible only to admins, with every view audit-logged.</p>
+        <div class="actions"><button class="btn" type="submit">Submit for review</button></div>
+      </form>
+      <div id="kyc-msg" class="msg"></div>
+    </section>
+  </div>
+
+  <section class="card">
+    <h2>Trading access &amp; API key</h2>
+    <div id="access"></div>
+    <div id="key-msg" class="msg"></div>
+  </section>
+
+  <section class="card">
+    <h2>Place a test order</h2>
+    <p class="small muted">Simulated fill at the live price. The button is shown to everyone on purpose: the <b>server</b> decides, and answers 403 unless your KYC is approved.</p>
+    <form id="f-order" class="row">
+      <div><label for="o-sym">Symbol</label><input id="o-sym" value="EURUSD" required></div>
+      <div><label for="o-side">Side</label><select id="o-side"><option>buy</option><option>sell</option></select></div>
+      <div><label for="o-qty">Quantity</label><input id="o-qty" type="number" value="1000" min="1" step="any" required></div>
+      <div><label>&nbsp;</label><button class="btn" type="submit">Place order</button></div>
+    </form>
+    <div id="order-msg" class="msg"></div>
+  </section>
+</main>
+<script src="/static/app.js"></script>
+<script src="/static/account.js"></script>
+</body>
+</html>

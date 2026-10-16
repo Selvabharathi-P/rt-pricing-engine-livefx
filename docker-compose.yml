@@ -1,0 +1,69 @@
+# docker-compose up
+#
+# Without a .env file the engine connects to the bundled simulator, so the
+# stack runs end-to-end with zero configuration. To use the live feed:
+#   cp .env.example .env   # then fill in API_KEY / API_SECRET
+#
+# Fixed project name: volumes are always pricing-engine_redis-data and
+# pricing-engine_secrets-data, whatever folder this file is in (backups rely on it).
+name: pricing-engine
+services:
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--save", "60", "1"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+    restart: unless-stopped
+
+  simulator:
+    build: .
+    entrypoint: ["/usr/local/bin/simulator"]
+    environment:
+      SIM_API_KEY: demo-key
+      SIM_API_SECRET: demo-secret
+      SIM_TICK_INTERVAL: ${SIM_TICK_INTERVAL:-100ms}
+      SIM_PAD_BYTES: ${SIM_PAD_BYTES:-250000} # ~256KB frames like upstream
+      SIM_DUP_RATE: "0.02"
+      SIM_OOO_RATE: "0.02"
+      SIM_DROP_EVERY: ${SIM_DROP_EVERY:-0s}
+    restart: unless-stopped
+
+  pricing-engine:
+    build: .
+    depends_on:
+      redis:
+        condition: service_healthy
+      simulator:
+        condition: service_started
+    ports:
+      - "8080:8080"
+    environment:
+      UPSTREAM_URL: ${UPSTREAM_URL:-ws://simulator:9001/ws/algo}
+      API_KEY: ${API_KEY:-demo-key}
+      API_SECRET: ${API_SECRET:-demo-secret}
+      REDIS_ADDR: redis:6379
+      LISTEN_ADDR: ":8080"
+      FLUSH_INTERVAL: 1s
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      SECRETS_DIR: /secrets
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      WS_REQUIRE_AUTH: ${WS_REQUIRE_AUTH:-true}
+    volumes:
+      - secrets-data:/secrets
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/pricing-engine", "healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    stop_grace_period: 10s
+    restart: unless-stopped
+
+volumes:
+  redis-data:
+  secrets-data: # signing / encryption keys, deliberately separate from Redis

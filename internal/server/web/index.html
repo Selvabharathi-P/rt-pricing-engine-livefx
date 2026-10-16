@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live Quotes</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="top"></header>
+<main>
+  <section class="card hidden" id="locked">
+    <h2>Live quotes are for verified merchants</h2>
+    <p><span id="locked-why" class="badge b-pending"></span></p>
+    <p>Trading data unlocks after an administrator approves your KYC. <a href="/account">Go to My account →</a></p>
+  </section>
+  <div id="live">
+    <div class="card tools">
+      <span class="status"><span id="dot" class="dot"></span><span id="state" class="muted">connecting…</span></span>
+      <div class="stats">
+        <span>symbols <b id="nsym">0</b></span>
+        <span>updates/s <b id="ups">0</b></span>
+        <span>last frame <b id="fsize">–</b></span>
+        <span>latency <b id="lat">–</b></span>
+      </div>
+    </div>
+    <div class="tools">
+      <input id="filter" type="search" placeholder="Filter symbols (e.g. USD, JPY, BTC)" autocomplete="off">
+      <select id="sort" aria-label="Sort">
+        <option value="symbol">Sort: symbol</option>
+        <option value="chg-desc">Sort: change ↓</option>
+        <option value="chg-asc">Sort: change ↑</option>
+      </select>
+    </div>
+    <section id="chart" class="card" hidden>
+      <div class="chart-head">
+        <h2 id="c-sym"></h2><span class="ohlc">1m candles · mid price</span>
+        <span class="ohlc" id="c-ohlc"></span>
+        <button id="c-close" class="btn ghost" type="button" aria-label="Close chart">Close</button>
+      </div>
+      <canvas id="cv"></canvas>
+    </section>
+    <div class="wrap">
+      <table id="quotes" class="num">
+        <thead><tr>
+          <th data-sort="symbol">Symbol</th><th>Buy</th><th>Sell</th><th>Mid</th><th>Spread</th>
+          <th>24h High</th><th>24h Low</th><th data-sort="chg">24h %</th><th>Updated</th>
+        </tr></thead>
+        <tbody id="rows"><tr><td class="empty" colspan="9">Waiting for prices…</td></tr></tbody>
+      </table>
+    </div>
+    <footer class="note">Click a row for 1-minute candles. 24h high, low and % change are computed by the engine from observed ticks on the <b>mid</b> price, not taken from the upstream feed. Latency = local receive time − tick timestamp.</footer>
+  </div>
+</main>
+<script src="/static/app.js"></script>
+<script src="/static/quotes.js"></script>
+</body>
+</html>
