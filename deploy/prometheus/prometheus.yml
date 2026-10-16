@@ -1,0 +1,11 @@
+# Scrapes the pricing engine's /metrics (Prometheus text format, see
+# internal/metrics). Runs inside the compose network.
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: pricing-engine
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["pricing-engine:8080"]

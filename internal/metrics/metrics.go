@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"runtime"
 	"sort"
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 type Counter struct{ v atomic.Uint64 }
@@ -73,6 +75,7 @@ type entry struct {
 	c                *Counter
 	g                *Gauge
 	h                *Histogram
+	fn               func() float64 // gauge computed at scrape time
 }
 
 type Registry struct {
@@ -90,6 +93,11 @@ func (r *Registry) Gauge(name, help string) *Gauge {
 	g := &Gauge{}
 	r.add(entry{name: name, help: help, kind: "gauge", g: g})
 	return g
+}
+
+// GaugeFunc registers a gauge whose value is computed on every scrape.
+func (r *Registry) GaugeFunc(name, help string, fn func() float64) {
+	r.add(entry{name: name, help: help, kind: "gauge", fn: fn})
 }
 
 func (r *Registry) Histogram(name, help string, bounds ...float64) *Histogram {
@@ -114,7 +122,11 @@ func (r *Registry) WritePrometheus(w io.Writer) {
 		case "counter":
 			fmt.Fprintf(w, "%s %d\n", e.name, e.c.Value())
 		case "gauge":
-			fmt.Fprintf(w, "%s %d\n", e.name, e.g.Value())
+			if e.fn != nil {
+				fmt.Fprintf(w, "%s %s\n", e.name, strconv.FormatFloat(e.fn(), 'g', -1, 64))
+			} else {
+				fmt.Fprintf(w, "%s %d\n", e.name, e.g.Value())
+			}
 		case "histogram":
 			var cum uint64
 			for i, b := range e.h.bounds {
@@ -157,6 +169,10 @@ type Set struct {
 	WSSlowDisconnect   *Counter
 	StoreFlushErrors   *Counter
 	StoreFlushTime     *Histogram
+	HTTPRequests       *Counter
+	HTTP4xx            *Counter
+	HTTP5xx            *Counter
+	HTTPLatency        *Histogram // excludes /ws (its duration is the session length)
 }
 
 func NewSet() *Set {
@@ -182,5 +198,21 @@ func NewSet() *Set {
 		WSSlowDisconnect:   r.Counter("pe_ws_slow_disconnects_total", "Clients dropped for failing to accept writes."),
 		StoreFlushErrors:   r.Counter("pe_store_flush_errors_total", "Failed state flushes."),
 		StoreFlushTime:     r.Histogram("pe_store_flush_seconds", "State flush duration.", LatencyBounds...),
+		HTTPRequests:       r.Counter("pe_http_requests_total", "HTTP requests served (all paths)."),
+		HTTP4xx:            r.Counter("pe_http_responses_4xx_total", "HTTP responses with a 4xx status."),
+		HTTP5xx:            r.Counter("pe_http_responses_5xx_total", "HTTP responses with a 5xx status."),
+		HTTPLatency:        r.Histogram("pe_http_request_seconds", "HTTP request duration (excluding WebSocket sessions).", LatencyBounds...),
 	}
+}
+
+// RegisterRuntime adds Go runtime gauges computed at scrape time.
+func (s *Set) RegisterRuntime() {
+	start := time.Now()
+	s.Registry.GaugeFunc("pe_go_goroutines", "Goroutines currently running.", func() float64 { return float64(runtime.NumGoroutine()) })
+	s.Registry.GaugeFunc("pe_go_heap_alloc_bytes", "Bytes of allocated heap objects.", func() float64 {
+		var ms runtime.MemStats
+		runtime.ReadMemStats(&ms)
+		return float64(ms.HeapAlloc)
+	})
+	s.Registry.GaugeFunc("pe_uptime_seconds", "Seconds since the process started.", func() float64 { return time.Since(start).Seconds() })
 }

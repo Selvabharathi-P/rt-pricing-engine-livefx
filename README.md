@@ -109,6 +109,7 @@ Keys are created in `./.secrets` on first run; the folder is git-ignored.
 |---|---|
 | Follow logs | `docker compose logs -f pricing-engine` |
 | Health / metrics | `curl localhost:8080/healthz`, `curl localhost:8080/metrics` |
+| Dashboards | Grafana http://localhost:3000 · Prometheus http://localhost:9090 |
 | Stop (keep data) | `docker compose down` |
 | **Reset everything** (price history, accounts, keys) | `docker compose down -v` |
 | Back up data | Stop the stack, then archive both volumes: `docker run --rm -v pricing-engine_redis-data:/data:ro -v ${PWD}:/backup alpine:3.20 tar czf /backup/redis-data.tgz -C /data .` (same for `pricing-engine_secrets-data`) |
@@ -367,6 +368,37 @@ That harness was a one-off and is not part of this repo.
 | `COOKIE_SECURE` | `false` | set `true` behind HTTPS |
 | `AUTH_TIMEOUT` / `READ_TIMEOUT` | `10s` / `30s` | |
 | `LOG_LEVEL` | `info` | JSON logs, with secrets redacted |
+
+## Monitoring (Grafana)
+
+`docker-compose up` also starts **Prometheus** and **Grafana**, both bound to
+`127.0.0.1`, so they're reachable from this machine only:
+
+| | URL | Notes |
+|---|---|---|
+| Grafana | http://localhost:3000 | The **Pricing Engine** dashboard opens as the home page. Viewing needs no login; the admin login is `admin` / `GRAFANA_ADMIN_PASSWORD` from `.env` (default `admin`). |
+| Prometheus | http://localhost:9090 | Scrapes `pricing-engine:8080/metrics` every 5 s and keeps 7 days. |
+
+The dashboard has 22 panels, refreshing every 5 s:
+
+| Row | Shows |
+|---|---|
+| Overview | Upstream feed up/down, ticks/s, WebSocket clients, processing p99, HTTP 5xx, Redis flush errors |
+| Price pipeline | Upstream frames vs accepted ticks; duplicates, out-of-order, rejected and unparsed frames; connection state; reconnect attempts |
+| Latency | Engine processing and end-to-end p50/p95/p99 (target ≤ 50 ms) |
+| WebSocket fan-out | Clients, frames/s, frame size against the 10 KB limit, slow-client conflation and disconnects |
+| Redis persistence | Flush duration, successful flushes per minute, errors |
+| HTTP | Requests by class (2xx/3xx, 4xx, 5xx), request latency p50/p95/p99 |
+| Runtime | Goroutines, heap, uptime |
+
+Files:
+- `deploy/prometheus/prometheus.yml`
+- `deploy/grafana/provisioning/` (data source and dashboard provider)
+- `deploy/grafana/dashboards/pricing-engine.json`
+
+To change the dashboard, edit `scripts/gen_grafana_dashboard.py`, run
+`python scripts/gen_grafana_dashboard.py .`, then
+`docker compose restart grafana`.
 
 ## Logging
 

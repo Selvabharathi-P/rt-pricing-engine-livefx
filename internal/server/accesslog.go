@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"pricing-engine/internal/metrics"
 	"pricing-engine/internal/security"
 )
 
@@ -25,7 +26,7 @@ import (
 // ERROR. Every response carries X-Request-ID matching its log line. The
 // WebSocket upgrade keeps working (Hijack is passed through); a /ws line is
 // written when the socket closes, with the session length as dur_ms.
-func AccessLog(log *slog.Logger, next http.Handler) http.Handler {
+func AccessLog(log *slog.Logger, m *metrics.Set, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		id := requestID(r.Header.Get("X-Request-ID"))
@@ -33,6 +34,18 @@ func AccessLog(log *slog.Logger, next http.Handler) http.Handler {
 		info := &security.RequestInfo{ID: id}
 		rec := &recorder{ResponseWriter: w, status: http.StatusOK}
 		defer func() {
+			if m != nil {
+				m.HTTPRequests.Inc()
+				switch {
+				case rec.status >= 500:
+					m.HTTP5xx.Inc()
+				case rec.status >= 400:
+					m.HTTP4xx.Inc()
+				}
+				if rec.status != http.StatusSwitchingProtocols {
+					m.HTTPLatency.Observe(time.Since(start).Seconds())
+				}
+			}
 			lvl := slog.LevelInfo
 			switch {
 			case rec.status >= 500:

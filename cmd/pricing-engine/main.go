@@ -63,6 +63,7 @@ func run() error {
 	defer stop()
 
 	m := metrics.NewSet()
+	m.RegisterRuntime()
 	eng := engine.New(cfg.Symbols, m)
 
 	st := store.NewRedis(cfg.RedisAddr, cfg.RedisPassword, cfg.RedisDB, cfg.StoreNS)
@@ -137,7 +138,7 @@ func run() error {
 	api.Register(mux)
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr,
-		Handler:           server.AccessLog(log, mux),
+		Handler:           server.AccessLog(log, m, mux),
 		ReadHeaderTimeout: 5 * time.Second,
 		MaxHeaderBytes:    16 << 10,
 	}
