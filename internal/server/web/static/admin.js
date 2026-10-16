@@ -105,7 +105,6 @@
     const p = current.profile, pii = current.pii || {};
     $('review').classList.remove('hidden');
     $('rv-title').textContent = 'Review: ' + p.name;
-    $('rv-msg').className = 'msg';
     $('rv-profile').innerHTML = `
       <dt>Email</dt><dd>${esc(p.email)}</dd><dt>Role</dt><dd>${badge(p.role)}${p.disabled ? ' ' + badge('disabled') : ''}</dd>
       <dt>KYC status</dt><dd>${badge(p.kyc.status)}</dd><dt>Reason</dt><dd>${esc(p.kyc.reason || '–')}</dd>

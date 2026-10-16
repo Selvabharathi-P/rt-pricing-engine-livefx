@@ -134,15 +134,30 @@
     if (pendingLayout) { pendingLayout = false; setTimeout(layout, 0); }
   });
 
+  let sortKey = 'symbol', sortDir = 1; // 1 = ascending, -1 = descending
+  const SORT_VALUE = {
+    buy: (q) => q.buy, sell: (q) => q.sell, mid: (q) => (q.buy + q.sell) / 2, spread: (q) => q.buy - q.sell,
+    hi: (q) => q.hi, lo: (q) => q.lo, chg: (q) => q.chg, ts: (q) => q.ts,
+  };
+
+  function markSort() {
+    document.querySelectorAll('#quotes th[data-key]').forEach((th) => {
+      const on = th.dataset.key === sortKey;
+      th.classList.toggle('sorted', on);
+      th.setAttribute('aria-sort', on ? (sortDir > 0 ? 'ascending' : 'descending') : 'none');
+      th.querySelector('.arr').textContent = on ? (sortDir > 0 ? '▲' : '▼') : '';
+    });
+  }
+
   function layout() {
     if (pressing) { pendingLayout = true; return; }
     const f = $('filter').value.trim().toUpperCase();
-    const mode = $('sort').value;
     const syms = [...quotes.keys()].filter((s) => !f || s.includes(f));
+    const val = SORT_VALUE[sortKey];
     syms.sort((a, b) => {
-      if (mode === 'chg-desc') return quotes.get(b).chg - quotes.get(a).chg;
-      if (mode === 'chg-asc') return quotes.get(a).chg - quotes.get(b).chg;
-      return a.localeCompare(b);
+      if (sortKey === 'symbol') return sortDir * a.localeCompare(b);
+      const d = val(quotes.get(a)) - val(quotes.get(b));
+      return d !== 0 ? sortDir * d : a.localeCompare(b); // ties: stable by symbol
     });
     const body = $('rows');
     $('nsym').textContent = quotes.size;
@@ -156,17 +171,25 @@
   }
 
   $('filter').addEventListener('input', layout);
-  $('sort').addEventListener('change', layout);
-  document.querySelectorAll('th[data-sort]').forEach((th) => th.addEventListener('click', () => {
-    const s = $('sort');
-    s.value = th.dataset.sort === 'symbol' ? 'symbol' : (s.value === 'chg-desc' ? 'chg-asc' : 'chg-desc');
+
+  // Header sorting: one column at a time. Click = ascending, click again =
+  // descending; clicking another column replaces the sort.
+  document.querySelectorAll('#quotes th[data-key]').forEach((th) => th.querySelector('button').addEventListener('click', () => {
+    const key = th.dataset.key;
+    sortDir = key === sortKey ? -sortDir : 1;
+    sortKey = key;
+    markSort();
     layout();
   }));
+  markSort();
 
   setInterval(() => {
-    if ($('sort').value !== 'symbol') layout(); // change-sorted views re-rank once a second, not per tick
+    if (sortKey !== 'symbol') layout(); // price-sorted views re-rank once a second, not per tick
     $('ups').textContent = updates;
-    $('lat').textContent = latN ? Math.round(latSum / latN) + ' ms' : '–';
+    // Server and browser clocks can differ by ~1 ms (Docker VM vs host), so
+    // near-zero latency may come out negative: show it as "<1 ms".
+    const lat = latN ? Math.round(latSum / latN) : null;
+    $('lat').textContent = lat === null ? '–' : lat < 1 ? '<1 ms' : lat + ' ms';
     updates = 0; latSum = 0; latN = 0;
     const now = Date.now();
     for (const tr of rows.values()) {

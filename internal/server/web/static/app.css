@@ -92,7 +92,6 @@ footer.note { color: var(--muted); font-size: 12px; margin-top: 10px; }
 .stats b { color: #e2e8f0; font-variant-numeric: tabular-nums; font-weight: 600; }
 .tools { display: flex; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
 .tools input { flex: 1; min-width: 160px; }
-.tools select { width: auto; }
 #quotes tbody tr { cursor: pointer; }
 #quotes tbody tr:hover td { background: color-mix(in srgb, var(--accent) 7%, transparent); }
 #quotes tbody tr.sel td { background: color-mix(in srgb, var(--accent) 14%, transparent); }
@@ -131,3 +130,11 @@ canvas { display: block; width: 100%; height: 280px; }
 @media (prefers-reduced-motion: reduce) { .toast { animation: none; } .toast.out { transition: none; } }
 @media (max-width: 520px) { #toasts { right: 8px; left: 8px; bottom: 8px; width: auto; } }
 .tile b.txt { font-size: 15px; padding: 5px 0 4px; text-transform: capitalize; }
+.table-note { color: var(--muted); font-size: 12px; margin: 0 0 8px; }
+#quotes th { padding: 0; }
+#quotes th button.sort { width: 100%; background: none; border: 0; color: inherit; font: inherit; font-weight: 600;
+  padding: 9px 12px; cursor: pointer; text-align: inherit; display: block; white-space: nowrap; }
+#quotes th button.sort:hover { color: var(--ink); background: color-mix(in srgb, var(--accent) 7%, transparent); }
+#quotes th button.sort:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+#quotes th.sorted { color: var(--ink); }
+#quotes th .arr { display: inline-block; width: 1em; margin-left: 4px; font-size: 10px; color: var(--accent); }
