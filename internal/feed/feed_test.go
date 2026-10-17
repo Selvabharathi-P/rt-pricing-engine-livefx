@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -241,5 +242,56 @@ func TestReason(t *testing.T) {
 		if got := Reason(err); got != want {
 			t.Errorf("Reason(%v) = %s, want %s", err, got, want)
 		}
+	}
+}
+
+func TestRegistry(t *testing.T) {
+	if got := strings.Join(Types(), ","); !strings.Contains(got, "livefxhub") {
+		t.Fatalf("types: %s", got)
+	}
+	d := Deps{Out: make(chan []model.Tick, 1), Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Metrics: metrics.NewSet()}
+	if _, err := New("nope", Config{URL: "ws://x"}, d); err == nil || !strings.Contains(err.Error(), "registered: ") {
+		t.Fatalf("unknown type: %v", err)
+	}
+	src, err := New("livefxhub", Config{Name: "primary", URL: "ws://x", Symbols: []string{"EURUSD"}}, d)
+	if err != nil || src.Name() != "primary" || src.Symbols()[0] != "EURUSD" {
+		t.Fatalf("build: %v %v", src, err)
+	}
+}
+
+// The configured retry settings drive reconnects: with a 50 ms
+// "session in use" wait (instead of the default 30 s) the client retries fast.
+func TestConfiguredSessionInUseWait(t *testing.T) {
+	var conns atomic.Int32
+	up := websocket.Upgrader{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := up.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		conns.Add(1)
+		var auth map[string]string
+		c.ReadJSON(&auth)
+		c.WriteJSON(map[string]string{"event": "error", "message": "already have an active session"})
+	}))
+	defer srv.Close()
+	var reasons []string
+	var mu sync.Mutex
+	src, _ := New("livefxhub", Config{Name: "t", URL: "ws" + strings.TrimPrefix(srv.URL, "http"), APIKey: "k", APISecret: "s",
+		Symbols: []string{"EURUSD"}, AuthTimeout: time.Second, ReadTimeout: time.Second, PingInterval: 500 * time.Millisecond,
+		Retry: Retry{MinBackoff: 10 * time.Millisecond, MaxBackoff: 20 * time.Millisecond, SessionInUseWait: 50 * time.Millisecond}},
+		Deps{Out: make(chan []model.Tick, 1), Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Metrics: metrics.NewSet(),
+			OnStatus: func(up bool, reason string) { mu.Lock(); reasons = append(reasons, reason); mu.Unlock() }})
+	ctx, cancel := context.WithTimeout(context.Background(), 700*time.Millisecond)
+	defer cancel()
+	src.Run(ctx)
+	if n := conns.Load(); n < 4 {
+		t.Fatalf("only %d connection attempts in 700 ms; configured wait not applied", n)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(reasons) == 0 || reasons[0] != StatusSessionInUse {
+		t.Fatalf("status reasons: %v", reasons)
 	}
 }

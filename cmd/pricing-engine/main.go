@@ -31,8 +31,11 @@ import (
 func main() {
 	// Container healthcheck (the distroless image has no curl/wget).
 	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
-		addr := os.Getenv("LISTEN_ADDR")
-		if addr == "" || addr[0] == ':' {
+		addr := ":8080"
+		if c, err := config.Load(); err == nil && c.Server.Listen != "" { // file + LISTEN_ADDR
+			addr = c.Server.Listen
+		}
+		if addr[0] == ':' {
 			addr = "localhost" + addr
 		}
 		c := http.Client{Timeout: 2 * time.Second}
@@ -54,7 +57,7 @@ func run() error {
 		return err
 	}
 	var lvl slog.Level
-	_ = lvl.UnmarshalText([]byte(cfg.LogLevel))
+	_ = lvl.UnmarshalText([]byte(cfg.Logging.Level))
 	log := slog.New(security.NewRedactingHandler(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: lvl})))
 	slog.SetDefault(log)
 	log.Info("starting", "config", cfg.String())
@@ -64,11 +67,12 @@ func run() error {
 
 	m := metrics.NewSet()
 	m.RegisterRuntime()
-	eng := engine.New(cfg.Symbols, m)
+	symbols := cfg.AllSymbols() // union of every enabled source
+	eng := engine.New(symbols, m)
 
-	st := store.NewRedis(cfg.RedisAddr, cfg.RedisPassword, cfg.RedisDB, cfg.StoreNS)
+	st := store.NewRedis(cfg.Redis.Addr, cfg.Redis.Password, cfg.Redis.DB, cfg.Persistence.Namespace)
 	defer st.Close()
-	states, err := loadWithRetry(ctx, st, cfg.Symbols, 30*time.Second, log)
+	states, err := loadWithRetry(ctx, st, symbols, 30*time.Second, log)
 	if err != nil {
 		// Serve from memory rather than not at all; flushes keep retrying.
 		log.Error("state restore failed; starting with empty state", "err", err)
@@ -77,16 +81,16 @@ func run() error {
 	log.Info("state restored", "symbols", len(states), "buckets", n)
 
 	hubOpts := server.DefaultOptions()
-	hubOpts.MaxClients, hubOpts.MaxFrameBytes = cfg.MaxClients, cfg.MaxFrameBytes
-	hubOpts.RequireAuth, hubOpts.MaxConnsPerMerchant = cfg.WSRequireAuth, cfg.MaxConnsPerMerchant
+	hubOpts.MaxClients, hubOpts.MaxFrameBytes = cfg.Server.MaxClients, cfg.Server.MaxFrameBytes
+	hubOpts.RequireAuth, hubOpts.MaxConnsPerMerchant = cfg.Server.RequireAuth, cfg.Server.MaxConnsPerMerchant
 	hub := server.NewHub(hubOpts, eng, m, log)
 
 	// Merchant accounts: KYC, roles, API keys. Key material lives outside Redis.
-	secrets, err := accounts.LoadOrCreateSecrets(cfg.SecretsDir)
+	secrets, err := accounts.LoadOrCreateSecrets(cfg.Accounts.SecretsDir)
 	if err != nil {
 		return err
 	}
-	acctRedis := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr, Password: cfg.RedisPassword, DB: cfg.RedisDB})
+	acctRedis := redis.NewClient(&redis.Options{Addr: cfg.Redis.Addr, Password: cfg.Redis.Password, DB: cfg.Redis.DB})
 	defer acctRedis.Close()
 	svc, err := accounts.NewService(accounts.NewStore(acctRedis, log), secrets, log)
 	if err != nil {
@@ -104,31 +108,47 @@ func run() error {
 		}
 		return qs[0].Buy, qs[0].Sell, true
 	}
-	api := accounts.NewAPI(svc, secrets, hub, price, log, cfg.CookieSecure)
+	api := accounts.NewAPI(svc, secrets, hub, price, log, cfg.Server.CookieSecure)
 	var protect func(http.Handler) http.Handler
-	if cfg.WSRequireAuth {
+	if cfg.Server.RequireAuth {
 		protect = api.MarketAccess
 	} else {
 		log.Warn("WS_REQUIRE_AUTH=false: market data is served without authentication")
 	}
 
+	// Market-data sources: every enabled config.yaml `sources:` entry, built
+	// through the source registry (feed.Register) by its `type`.
 	ticks := make(chan []model.Tick, 256)
-	fc := feed.NewClient(feed.Config{
-		URL: cfg.UpstreamURL, APIKey: cfg.APIKey, APISecret: cfg.APISecret, Symbols: cfg.Symbols,
-		AuthTimeout: cfg.AuthTimeout, ReadTimeout: cfg.ReadTimeout,
-	}, ticks, log, m)
-	fc.OnStatus = hub.SetUpstream // tell web clients when the market feed goes up or down
+	status := newSourceStatus(hub, m, log)
+	var sources []feed.Source
+	for _, sc := range cfg.EnabledSources() {
+		src, err := feed.New(sc.Type, feed.Config{
+			Name: sc.Name, URL: sc.URL, APIKey: sc.APIKey, APISecret: sc.APISecret, Symbols: sc.Symbols,
+			AuthTimeout: sc.AuthTimeout.Duration, ReadTimeout: sc.ReadTimeout.Duration, PingInterval: sc.PingInterval.Duration,
+			Retry: feed.Retry{
+				MinBackoff: sc.Retry.MinBackoff.Duration, MaxBackoff: sc.Retry.MaxBackoff.Duration,
+				StableAfter: sc.Retry.StableAfter.Duration, SessionInUseWait: sc.Retry.SessionInUseWait.Duration,
+				SessionInUseJitter: sc.Retry.SessionInUseJitter.Duration,
+			},
+		}, feed.Deps{Out: ticks, Log: log, Metrics: m, OnStatus: status.reporter(sc.Name)})
+		if err != nil {
+			return fmt.Errorf("source %q: %w", sc.Name, err)
+		}
+		sources = append(sources, src)
+	}
 
 	var pipeline sync.WaitGroup
-	pipeline.Add(2)
-	go func() { defer pipeline.Done(); fc.Run(ctx) }()
+	pipeline.Add(len(sources) + 1)
+	for _, src := range sources {
+		go func() { defer pipeline.Done(); src.Run(ctx) }()
+	}
 	go func() { defer pipeline.Done(); process(ctx, ticks, eng, hub, m) }()
 	go hub.Revalidate(ctx)
 	go pipelineSummary(ctx, m, log)
 
 	// The flusher outlives the pipeline so its final flush sees every tick.
 	flushCtx, stopFlush := context.WithCancel(context.Background())
-	flusher := &store.Flusher{Store: st, Source: eng.DrainDirty, Interval: cfg.FlushInterval, Log: log, Metrics: m}
+	flusher := &store.Flusher{Store: st, Source: eng.DrainDirty, Interval: cfg.Persistence.FlushInterval.Duration, Log: log, Metrics: m}
 	flushDone := make(chan struct{})
 	go func() { defer close(flushDone); flusher.Run(flushCtx) }()
 
@@ -137,14 +157,14 @@ func run() error {
 	}, protect)
 	api.Register(mux)
 	srv := &http.Server{
-		Addr:              cfg.ListenAddr,
+		Addr:              cfg.Server.Listen,
 		Handler:           server.AccessLog(log, m, mux),
 		ReadHeaderTimeout: 5 * time.Second,
 		MaxHeaderBytes:    16 << 10,
 	}
 	srvErr := make(chan error, 1)
 	go func() {
-		log.Info("listening", "addr", cfg.ListenAddr)
+		log.Info("listening", "addr", cfg.Server.Listen)
 		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 			srvErr <- err
 		}
@@ -172,18 +192,18 @@ func run() error {
 // one is generated and printed once to stderr (deliberately not via the
 // logger, which redacts anything named password).
 func bootstrapAdmin(ctx context.Context, svc *accounts.Service, cfg config.Config, log *slog.Logger) error {
-	pw, generated := cfg.AdminPassword, false
+	pw, generated := cfg.Accounts.AdminPassword, false
 	if pw == "" {
 		pw, generated = randomPassword(), true
 	}
-	created, err := svc.EnsureAdmin(ctx, cfg.AdminEmail, pw)
+	created, err := svc.EnsureAdmin(ctx, cfg.Accounts.AdminEmail, pw)
 	if err != nil || !created {
 		return err
 	}
-	log.Info("bootstrap admin created", "email", cfg.AdminEmail)
+	log.Info("bootstrap admin created", "email", cfg.Accounts.AdminEmail)
 	if generated {
 		fmt.Fprintf(os.Stderr, "\n==== BOOTSTRAP ADMIN (shown once) ====\n  email:    %s\n  password: %s\n"+
-			"  Set ADMIN_PASSWORD in .env to choose your own.\n=====================================\n\n", cfg.AdminEmail, pw)
+			"  Set ADMIN_PASSWORD in .env to choose your own.\n=====================================\n\n", cfg.Accounts.AdminEmail, pw)
 	}
 	return nil
 }
@@ -198,6 +218,57 @@ func randomPassword() string {
 		b[i] = alphabet[int(b[i])%len(alphabet)]
 	}
 	return string(b)
+}
+
+type srcState struct {
+	up     bool
+	reason string
+}
+
+// sourceStatus combines the per-source connection states into the single
+// upstream status shown to users and in metrics: up only when every enabled
+// source is up; otherwise the first down source's reason (config order).
+type sourceStatus struct {
+	mu    sync.Mutex
+	order []string
+	state map[string]srcState
+	hub   *server.Hub
+	m     *metrics.Set
+	log   *slog.Logger
+}
+
+func newSourceStatus(hub *server.Hub, m *metrics.Set, log *slog.Logger) *sourceStatus {
+	return &sourceStatus{hub: hub, m: m, log: log, state: map[string]srcState{}}
+}
+
+func (s *sourceStatus) reporter(name string) func(up bool, reason string) {
+	s.mu.Lock()
+	s.order = append(s.order, name)
+	s.mu.Unlock()
+	return func(up bool, reason string) {
+		s.mu.Lock()
+		s.state[name] = srcState{up, reason}
+		allUp, why := true, "connected"
+		for _, n := range s.order {
+			st, ok := s.state[n]
+			if !ok || !st.up {
+				allUp = false
+				if ok {
+					why = st.reason
+				} else {
+					why = "connecting"
+				}
+				break
+			}
+		}
+		s.mu.Unlock()
+		if allUp {
+			s.m.UpstreamUp.Set(1)
+		} else {
+			s.m.UpstreamUp.Set(0)
+		}
+		s.hub.SetUpstream(allUp, why)
+	}
 }
 
 // pipelineSummary writes one INFO line per minute describing the price

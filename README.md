@@ -39,14 +39,19 @@ Measured results (details in [Performance](#performance)):
 
 Port 8080 must be free.
 
+**Without LiveFXHub keys (bundled simulator):**
+
 ```bash
+cp .env.example .env      # then set SOURCES_ENABLED=simulator in .env
 docker-compose up --build
 ```
 
-No configuration is needed. Without a `.env` file, the engine connects to the
-bundled **simulator**, which speaks the same auth/subscribe protocol. The
-simulator sends ~256 KB frames and injects duplicates, out-of-order ticks and
-bogus upstream 24h values.
+`SOURCES_ENABLED=simulator` switches the engine from the live source to the
+`simulator` source in `config.yaml`, with no file edit. (One-off, without
+`.env`: `SOURCES_ENABLED=simulator docker-compose up --build`.) The simulator
+mimics LiveFXHub's protocol and messages; see [Simulator](#simulator).
+Without `SOURCES_ENABLED`, the live source is used and startup needs
+`API_KEY` / `API_SECRET`.
 
 **To use the live feed:**
 
@@ -55,8 +60,8 @@ cp .env.example .env      # set API_KEY / API_SECRET (shared via your registered
 docker-compose up --build
 ```
 
-`.env` sets `UPSTREAM_URL=wss://v3-prod.livefxhub.com/ws/algo`. The engine
-then performs the expected workflow:
+The `livefxhub` source (`wss://v3-prod.livefxhub.com/ws/algo`) is enabled by
+default. The engine then performs the expected workflow:
 1. connect;
 2. send `{"action":"auth",...}`;
 3. wait for a non-error reply;
@@ -100,6 +105,9 @@ Security design, flow diagram and every check: **[docs/SECURITY.md](docs/SECURIT
 go run ./cmd/simulator &
 API_KEY=demo-key API_SECRET=demo-secret UPSTREAM_URL=ws://localhost:9001/ws/algo go run ./cmd/pricing-engine
 ```
+
+This points the first source at the local simulator (the `simulator` source's
+URL uses the compose hostname, which doesn't resolve outside Docker).
 
 Keys are created in `./.secrets` on first run; the folder is git-ignored.
 
@@ -255,7 +263,8 @@ LiveFXHub.
 
 ### Simulator (load and payload test)
 
-These runs were measured before downstream authentication was added.
+These runs used the simulator's `mode: legacy` (the assignment brief's
+format), measured before downstream authentication was added.
 Authentication happens once per connection and doesn't touch the per-tick
 path.
 
@@ -350,24 +359,87 @@ That harness was a one-off and is not part of this repo.
 
 ## Configuration
 
-| Variable | Default | |
-|---|---|---|
-| `UPSTREAM_URL` | `wss://v3-prod.livefxhub.com/ws/algo` | compose defaults to the simulator unless `.env` overrides |
-| `API_KEY`, `API_SECRET` | — (required) | never logged |
-| `SYMBOLS` | the 61 assignment symbols | comma-separated |
-| `LISTEN_ADDR` | `:8080` | |
-| `REDIS_ADDR`, `REDIS_PASSWORD`, `REDIS_DB` | `localhost:6379`, —, `0` | |
-| `STORE_NAMESPACE` | `pe:<upstream host>:` | keeps simulator and live state apart |
-| `FLUSH_INTERVAL` | `1s` | state persistence cadence |
-| `MAX_FRAME_BYTES` | `9984` | hard cap per outgoing frame (512–10240) |
-| `MAX_CLIENTS` | `10000` | further connections get HTTP 503 |
-| `WS_REQUIRE_AUTH` | `true` | `false` serves `/ws` and market-data REST without auth (benchmarks only) |
-| `MAX_CONNS_PER_MERCHANT` | `5` | concurrent WebSocket sessions per merchant |
-| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | `admin@example.com` / random | bootstrap admin, created on first start |
-| `SECRETS_DIR` | `.secrets` (`/secrets` in Docker) | signing, KYC-encryption and API-key pepper keys; a separate volume from Redis |
-| `COOKIE_SECURE` | `false` | set `true` behind HTTPS |
-| `AUTH_TIMEOUT` / `READ_TIMEOUT` | `10s` / `30s` | |
-| `LOG_LEVEL` | `info` | JSON logs, with secrets redacted |
+Settings live in **[`config.yaml`](config.yaml)**, which is fully commented.
+
+**Where it's read from:**
+- precedence, lowest to highest: built-in defaults → `config.yaml` → environment variables;
+- the file is found via `CONFIG_FILE`, else `./config.yaml`, else `/etc/pricing-engine/config.yaml`;
+- docker-compose mounts the repo's file there, so after an edit just run `docker compose restart pricing-engine`.
+
+**Format rules:**
+- **Durations:** `500ms`, `30s`, `2m`, or a plain number meaning seconds (`max_backoff: 30` is 30 s).
+- **No secrets in the file:** keys like `api_key_env: API_KEY` name the environment variable that holds the value (keep those in `.env`).
+- **Strict:** unknown keys, bad values and missing credentials stop startup with a message naming the setting.
+
+| Section | Key settings |
+|---|---|
+| `server` | `listen`, `max_clients`, `max_frame_bytes` (≤ 10240), `max_conns_per_merchant`, `require_auth`, `cookie_secure` |
+| `redis` | `addr`, `db`, `password_env` |
+| `persistence` | `flush_interval`, `namespace` (default `pe:<host of first source>:`) |
+| `accounts` | `secrets_dir`, `admin_email`, `admin_password_env` |
+| `logging` | `level` |
+| `sources[]` | `name`, `type`, `enabled`, `url`, `api_key_env`, `api_secret_env`, `symbols`, `auth_timeout`, `read_timeout`, `ping_interval`, `retry.{min_backoff, max_backoff, stable_after, session_in_use_wait, session_in_use_jitter}` |
+
+### Source registry
+
+`sources:` is a list. Every enabled entry is started, they all feed the same
+engine, and their symbols are merged. The page and `/healthz` show the feed
+as up only while every enabled source is up.
+
+`type` picks the implementation from the registry in `internal/feed`
+(`feed.Register`). Today there's `livefxhub`, the auth → subscribe → prices
+protocol, which the simulator also speaks.
+
+- **To add another feed using the same protocol:** add an entry with its own
+  `name`, `url`, credentials env vars and symbols.
+- **To add a new protocol:** implement `feed.Source` (`Name`, `Symbols`, `Run`)
+  and register it under a new type name in an `init()`. No other code needs to
+  change.
+
+### Simulator
+
+`cmd/simulator` stands in for LiveFXHub. It's configured in the `simulator:`
+section of the same `config.yaml` (the engine ignores that section); the
+engine reaches it through the `simulator` entry under `sources:`.
+
+**`mode: livefxhub` (default)** reproduces what the live feed was observed to do:
+- no greeting; any command before auth → `{"event":"error","message":"Must authenticate first"}` and close 4001;
+- wrong key/secret → `{"event":"error","message":"invalid credentials"}` and close 4001;
+- a second connection on the same key → `"already have an active session"` and close 4003 (`one_session_per_key`);
+- one `{"event":"marketPriceSnapshot","symbol","bid","ask","high","low","percentage"}` object per frame, with no timestamp;
+- the 11 symbols live never sent (`silent_symbols`) are accepted but never streamed;
+- realistic base prices, a random walk (`volatility`), occasional duplicates (`duplicate_rate`), and an optional forced disconnect (`drop_every`).
+
+The success replies (`{"event":"auth","status":"success"}` and
+`{"event":"subscribed",...}`) are assumptions: live was only ever seen
+rejecting. The engine accepts any non-error reply.
+
+**`mode: legacy`** sends the brief's format: arrays with buy/sell/timestamp,
+bogus 24h fields, out-of-order ticks and ~256 KB padding. It's used for the
+load numbers above.
+
+**Accepted credentials:** the env vars named by `api_key_env` /
+`api_secret_env` (`SIM_API_KEY` / `SIM_API_SECRET`), defaulting to
+`demo-key` / `demo-secret`. The engine's `simulator` source reads the same
+variables, so they always match.
+
+### Environment overrides
+
+These are kept so `.env` and docker-compose keep working. Empty values are
+ignored.
+
+| Variable | Overrides |
+|---|---|
+| `SOURCES_ENABLED` | comma list of source names to run (e.g. `simulator`); all others are disabled |
+| `UPSTREAM_URL`, `SYMBOLS`, `AUTH_TIMEOUT`, `READ_TIMEOUT` | the **first** source |
+| `API_KEY` / `API_SECRET` | credentials (the defaults for `api_key_env` / `api_secret_env`) |
+| `LISTEN_ADDR`, `MAX_CLIENTS`, `MAX_FRAME_BYTES`, `MAX_CONNS_PER_MERCHANT`, `WS_REQUIRE_AUTH`, `COOKIE_SECURE` | `server.*` |
+| `REDIS_ADDR`, `REDIS_DB`, `REDIS_PASSWORD` | `redis.*` |
+| `FLUSH_INTERVAL`, `STORE_NAMESPACE` | `persistence.*` |
+| `SECRETS_DIR`, `ADMIN_EMAIL`, `ADMIN_PASSWORD` | `accounts.*` |
+| `LOG_LEVEL` | `logging.level` |
+| `CONFIG_FILE` | path to the YAML file |
+| `SIM_LISTEN_ADDR`, `SIM_MODE`, `SIM_TICK_INTERVAL`, `SIM_DROP_EVERY` | `simulator.*` (cmd/simulator only) |
 
 ## Monitoring (Grafana)
 

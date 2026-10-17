@@ -1,0 +1,171 @@
+# pricing-engine configuration
+#
+# Precedence: built-in defaults < this file < environment variables.
+# Found via CONFIG_FILE, else ./config.yaml, else /etc/pricing-engine/config.yaml
+# (docker-compose mounts this file there, so edits apply on restart:
+#   docker compose restart pricing-engine).
+#
+# Durations: "500ms", "30s", "2m", or a plain number = seconds (30 -> 30s).
+# Secrets never go in this file: *_env keys name the environment variable
+# that holds the value (put those in .env, which is git-ignored).
+# Unknown keys are rejected at startup, so typos fail loudly.
+
+server:
+  listen: ":8080"
+  max_clients: 10000            # further WebSocket connections get HTTP 503
+  max_frame_bytes: 9984         # hard cap per outgoing WebSocket frame (512-10240)
+  max_conns_per_merchant: 5     # concurrent WebSocket sessions per merchant
+  require_auth: true            # false = no auth on /ws and market data (benchmarks only)
+  cookie_secure: false          # set true behind HTTPS
+
+redis:
+  addr: "localhost:6379"        # docker-compose overrides this with REDIS_ADDR=redis:6379
+  db: 0
+  password_env: REDIS_PASSWORD
+
+persistence:
+  flush_interval: 1s            # how often changed price buckets are written to Redis
+  # namespace: "pe:v3-prod.livefxhub.com:"   # default: pe:<host of the first enabled source>:
+
+accounts:
+  secrets_dir: ".secrets"       # signing / KYC encryption keys (docker: /secrets volume)
+  admin_email: "admin@example.com"
+  admin_password_env: ADMIN_PASSWORD   # empty -> a random password is printed once at first start
+
+logging:
+  level: info                   # debug | info | warn | error
+
+# Source registry: every enabled entry is started and feeds the same engine.
+# `type` selects the implementation (registered in internal/feed; today:
+# livefxhub). Symbols from all sources are merged. The env vars UPSTREAM_URL
+# and SYMBOLS override the FIRST source (kept for .env / docker-compose).
+sources:
+  - name: livefxhub
+    type: livefxhub
+    enabled: false
+    url: "wss://v3-prod.livefxhub.com/ws/algo"
+    api_key_env: API_KEY
+    api_secret_env: API_SECRET
+    auth_timeout: 10s           # wait this long for the auth reply
+    read_timeout: 30s           # reconnect if the source is silent this long
+    ping_interval: 15s          # keep-alive ping (must be shorter than read_timeout)
+    retry:
+      min_backoff: 500ms        # first reconnect delay (exponential, full jitter)
+      max_backoff: 30s          # cap on the reconnect delay
+      stable_after: 30s         # a session that lasted this long resets the backoff
+      session_in_use_wait: 30s  # "already have an active session": wait at least this long...
+      session_in_use_jitter: 10s #  ...plus up to this much, so we don't keep the lock refreshed
+    symbols:
+      - AUDUSD
+      - AUDCAD
+      - AUDCHF
+      - AUDJPY
+      - AUDNZD
+      - AUDSGD
+      - CADCHF
+      - CADJPY
+      - CHFJPY
+      - CHFSGD
+      - EURAUD
+      - EURCAD
+      - EURCHF
+      - EURGBP
+      - EURJPY
+      - EURNZD
+      - EURUSD
+      - GBPAUD
+      - GBPCAD
+      - GBPCHF
+      - GBPJPY
+      - GBPNZD
+      - GBPUSD
+      - NZDCAD
+      - NZDCHF
+      - NZDJPY
+      - NZDUSD
+      - USDCAD
+      - USDCHF
+      - USDCNH
+      - USDJPY
+      - USDMXN
+      - USDNOK
+      - USDPLN
+      - USDSEK
+      - USDSGD
+      - USDTRY
+      - USDZAR
+      - EURTRY
+      - GBPTRY
+      - NOKJPY
+      - SEKJPY
+      - SGDJPY
+      - ZARJPY
+      - XAUUSD
+      - XAGUSD
+      - BTCUSD
+      - ETHUSD
+      - BNBUSD
+      - SOLUSD
+      - XRPUSD
+      - ADAUSD
+      - DOGUSD
+      - DOTUSD
+      - LTCUSD
+      - BCHUSD
+      - XLMUSD
+      - TRXUSD
+      - UNIUSD
+      - FILUSD
+      - AVXUSD
+
+  # The bundled simulator (cmd/simulator), configured in `simulator:` below.
+  # Use it without LiveFXHub keys: set enabled: true here and false above, or
+  # put SOURCES_ENABLED=simulator in .env (no file edit needed).
+  - name: simulator
+    type: livefxhub              # it speaks the LiveFXHub protocol
+    enabled: true
+    url: "ws://simulator:9001/ws/algo"   # compose service name; ws://localhost:9001/ws/algo when run locally
+    api_key_env: SIM_API_KEY
+    api_secret_env: SIM_API_SECRET
+    retry:
+      session_in_use_wait: 5s    # the simulator releases sessions instantly
+      session_in_use_jitter: 2s
+    symbols: [AUDUSD, AUDCAD, AUDCHF, AUDJPY, AUDNZD, AUDSGD, CADCHF, CADJPY, CHFJPY, CHFSGD,
+              EURAUD, EURCAD, EURCHF, EURGBP, EURJPY, EURNZD, EURUSD, GBPAUD, GBPCAD, GBPCHF,
+              GBPJPY, GBPNZD, GBPUSD, NZDCAD, NZDCHF, NZDJPY, NZDUSD, USDCAD, USDCHF, USDCNH,
+              USDJPY, USDMXN, USDNOK, USDPLN, USDSEK, USDSGD, USDTRY, USDZAR, EURTRY, GBPTRY,
+              NOKJPY, SEKJPY, SGDJPY, ZARJPY, XAUUSD, XAGUSD, BTCUSD, ETHUSD, BNBUSD, SOLUSD,
+              XRPUSD, ADAUSD, DOGUSD, DOTUSD, LTCUSD, BCHUSD, XLMUSD, TRXUSD, UNIUSD, FILUSD,
+              AVXUSD]
+
+  # Example: a second source. Add an entry like this (and, for a new
+  # protocol, register its type with feed.Register in internal/feed).
+  # - name: backup-feed
+  #   type: livefxhub
+  #   enabled: false
+  #   url: "wss://example.com/ws"
+  #   api_key_env: BACKUP_API_KEY
+  #   api_secret_env: BACKUP_API_SECRET
+  #   retry:
+  #     max_backoff: 60
+  #   symbols: [EURUSD, GBPUSD]
+
+# Settings for cmd/simulator (a stand-in for LiveFXHub). The engine ignores
+# this section. SIM_LISTEN_ADDR, SIM_MODE, SIM_TICK_INTERVAL and
+# SIM_DROP_EVERY override it.
+simulator:
+  listen: ":9001"
+  path: /ws/algo
+  mode: livefxhub              # livefxhub = real feed's protocol & messages; legacy = assignment-brief format
+  api_key_env: SIM_API_KEY     # credentials it accepts (default demo-key / demo-secret)
+  api_secret_env: SIM_API_SECRET
+  one_session_per_key: true    # like live: a second connection on a key gets "already have an active session"
+  tick_interval: 100ms
+  update_ratio: 0.2            # share of symbols updated per tick (61 symbols at 100ms ~ 100 frames/s)
+  volatility: 0.00015          # per-update random-walk step (relative)
+  silent_symbols: [GBPCAD, GBPCHF, GBPJPY, USDPLN, DOGUSD, DOTUSD, LTCUSD, BCHUSD, XLMUSD, UNIUSD, FILUSD]  # never streamed, like live
+  duplicate_rate: 0.01         # occasionally resend the previous frame
+  drop_every: 0s               # e.g. 60s to test reconnects
+  # legacy mode only:
+  out_of_order_rate: 0.02
+  pad_bytes: 250000            # pad frames to ~256 KB, as the brief describes

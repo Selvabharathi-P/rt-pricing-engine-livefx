@@ -18,13 +18,49 @@ import (
 	"pricing-engine/internal/model"
 )
 
+// Config is one source's settings (built from a config.yaml `sources:` entry).
 type Config struct {
-	URL         string
-	APIKey      string
-	APISecret   string
-	Symbols     []string
-	AuthTimeout time.Duration
-	ReadTimeout time.Duration
+	Name         string
+	URL          string
+	APIKey       string
+	APISecret    string
+	Symbols      []string
+	AuthTimeout  time.Duration
+	ReadTimeout  time.Duration // reconnect if the source is silent this long
+	PingInterval time.Duration
+	Retry        Retry
+}
+
+// Retry controls reconnects (see config.RetryConfig for the meaning).
+type Retry struct {
+	MinBackoff         time.Duration
+	MaxBackoff         time.Duration
+	StableAfter        time.Duration
+	SessionInUseWait   time.Duration
+	SessionInUseJitter time.Duration
+}
+
+// withDefaults fills anything left unset.
+func (c Config) withDefaults() Config {
+	set := func(d *time.Duration, v time.Duration) {
+		if *d <= 0 {
+			*d = v
+		}
+	}
+	if c.Name == "" {
+		c.Name = "upstream"
+	}
+	set(&c.AuthTimeout, 10*time.Second)
+	set(&c.ReadTimeout, 30*time.Second)
+	set(&c.PingInterval, 15*time.Second)
+	set(&c.Retry.MinBackoff, 500*time.Millisecond)
+	set(&c.Retry.MaxBackoff, 30*time.Second)
+	set(&c.Retry.StableAfter, 30*time.Second)
+	set(&c.Retry.SessionInUseWait, 30*time.Second)
+	if c.Retry.SessionInUseJitter < 0 {
+		c.Retry.SessionInUseJitter = 0
+	}
+	return c
 }
 
 type Client struct {
@@ -65,8 +101,11 @@ func (c *Client) status(up bool, reason string) {
 }
 
 func NewClient(cfg Config, out chan<- []model.Tick, log *slog.Logger, m *metrics.Set) *Client {
-	return &Client{cfg: cfg, out: out, log: log, m: m}
+	return &Client{cfg: cfg.withDefaults(), out: out, log: log, m: m}
 }
+
+func (c *Client) Name() string      { return c.cfg.Name }
+func (c *Client) Symbols() []string { return c.cfg.Symbols }
 
 // ErrAuth means upstream explicitly rejected our credentials.
 var ErrAuth = errors.New("upstream authentication rejected")
@@ -76,39 +115,33 @@ var ErrAuth = errors.New("upstream authentication rejected")
 // same keys, or our previous session not yet released by the server).
 var ErrSessionInUse = errors.New("upstream session already active for these credentials")
 
-// Retrying a busy session quickly only keeps refreshing the server-side
-// lock, so wait much longer than for ordinary network errors.
-const sessionInUseWait = 30 * time.Second
-
-const (
-	minBackoff  = 500 * time.Millisecond
-	maxBackoff  = 30 * time.Second
-	stableAfter = 30 * time.Second // a session this long resets the backoff
-	pingEvery   = 15 * time.Second
-)
-
 // Run keeps a session alive until ctx is cancelled, reconnecting with
 // exponential backoff and full jitter. Every reconnect re-authenticates and
 // re-subscribes; duplicate ticks replayed after a reconnect are removed by
 // the engine.
 func (c *Client) Run(ctx context.Context) {
-	backoff := minBackoff
+	r := c.cfg.Retry
+	backoff := r.MinBackoff
 	for ctx.Err() == nil {
 		start := time.Now()
 		err := c.session(ctx)
-		c.m.UpstreamUp.Set(0)
 		if ctx.Err() != nil {
 			return
 		}
 		c.status(false, Reason(err))
-		if time.Since(start) > stableAfter {
-			backoff = minBackoff
+		if time.Since(start) > r.StableAfter {
+			backoff = r.MinBackoff
 		}
-		wait := time.Duration(rand.Int64N(int64(backoff))) + minBackoff/2
+		wait := time.Duration(rand.Int64N(int64(backoff))) + r.MinBackoff/2
 		lvl := slog.LevelWarn
 		switch {
 		case errors.Is(err, ErrSessionInUse):
-			wait = sessionInUseWait + time.Duration(rand.Int64N(int64(10*time.Second)))
+			// Retrying a busy session quickly only keeps refreshing the
+			// server-side lock, so wait much longer than for network errors.
+			wait = r.SessionInUseWait
+			if r.SessionInUseJitter > 0 {
+				wait += time.Duration(rand.Int64N(int64(r.SessionInUseJitter)))
+			}
 			c.log.Warn("upstream rejected login: another session is active for these API keys. "+
 				"Close any other client using them; a stale session is released by the server after its timeout",
 				"err", err, "retry_in", wait.Round(time.Second).String())
@@ -124,7 +157,7 @@ func (c *Client) Run(ctx context.Context) {
 			return
 		case <-time.After(wait):
 		}
-		backoff = min(backoff*2, maxBackoff)
+		backoff = min(backoff*2, r.MaxBackoff)
 	}
 }
 
@@ -152,7 +185,6 @@ func (c *Client) session(ctx context.Context) error {
 		return fmt.Errorf("subscribe: %w", err)
 	}
 	c.log.Info("upstream subscribed", "symbols", len(c.cfg.Symbols))
-	c.m.UpstreamUp.Set(1)
 	c.status(true, StatusConnected)
 
 	conn.SetPongHandler(func(string) error {
@@ -161,7 +193,7 @@ func (c *Client) session(ctx context.Context) error {
 	pingDone := make(chan struct{})
 	defer close(pingDone)
 	go func() {
-		t := time.NewTicker(pingEvery)
+		t := time.NewTicker(c.cfg.PingInterval)
 		defer t.Stop()
 		for {
 			select {
