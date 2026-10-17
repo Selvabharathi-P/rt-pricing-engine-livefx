@@ -13,6 +13,8 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/bin/pricing-engine
 # Static binaries on distroless: no shell, no package manager, non-root.
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/bin/ /usr/local/bin/
+# Default config (docker-compose mounts the repo's config.yaml over it).
+COPY config.yaml /etc/pricing-engine/config.yaml
 # Owned by nonroot so a fresh named volume mounted here is writable.
 COPY --from=build --chown=nonroot:nonroot --chmod=700 /out/secrets /secrets
 USER nonroot:nonroot

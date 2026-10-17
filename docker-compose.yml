@@ -1,8 +1,8 @@
 # docker-compose up
 #
-# Without a .env file the engine connects to the bundled simulator, so the
-# stack runs end-to-end with zero configuration. To use the live feed:
-#   cp .env.example .env   # then fill in API_KEY / API_SECRET
+# Live feed: cp .env.example .env and fill in API_KEY / API_SECRET.
+# No LiveFXHub keys? Run the bundled simulator instead:
+#   SOURCES_ENABLED=simulator docker compose up   (or put it in .env)
 #
 # Fixed project name: volumes are always pricing-engine_redis-data and
 # pricing-engine_secrets-data, whatever folder this file is in (backups rely on it).
@@ -24,13 +24,14 @@ services:
     build: .
     entrypoint: ["/usr/local/bin/simulator"]
     environment:
-      SIM_API_KEY: demo-key
-      SIM_API_SECRET: demo-secret
-      SIM_TICK_INTERVAL: ${SIM_TICK_INTERVAL:-100ms}
-      SIM_PAD_BYTES: ${SIM_PAD_BYTES:-250000} # ~256KB frames like upstream
-      SIM_DUP_RATE: "0.02"
-      SIM_OOO_RATE: "0.02"
-      SIM_DROP_EVERY: ${SIM_DROP_EVERY:-0s}
+      CONFIG_FILE: /etc/pricing-engine/config.yaml   # reads the `simulator:` section
+      SIM_API_KEY: ${SIM_API_KEY:-demo-key}
+      SIM_API_SECRET: ${SIM_API_SECRET:-demo-secret}
+      SIM_MODE: ${SIM_MODE:-}
+      SIM_TICK_INTERVAL: ${SIM_TICK_INTERVAL:-}
+      SIM_DROP_EVERY: ${SIM_DROP_EVERY:-}
+    volumes:
+      - ./config.yaml:/etc/pricing-engine/config.yaml:ro
     restart: unless-stopped
 
   pricing-engine:
@@ -42,20 +43,27 @@ services:
         condition: service_started
     ports:
       - "8080:8080"
+    # Settings live in config.yaml (mounted below). Only deployment-specific
+    # values are set here; the ${VAR:-} entries pass .env values through and
+    # are ignored when empty, so config.yaml decides.
     environment:
-      UPSTREAM_URL: ${UPSTREAM_URL:-ws://simulator:9001/ws/algo}
-      API_KEY: ${API_KEY:-demo-key}
-      API_SECRET: ${API_SECRET:-demo-secret}
+      CONFIG_FILE: /etc/pricing-engine/config.yaml
+      SOURCES_ENABLED: ${SOURCES_ENABLED:-}   # e.g. "simulator" to run without LiveFXHub keys
+      UPSTREAM_URL: ${UPSTREAM_URL:-}
+      API_KEY: ${API_KEY:-}
+      API_SECRET: ${API_SECRET:-}
+      SIM_API_KEY: ${SIM_API_KEY:-demo-key}
+      SIM_API_SECRET: ${SIM_API_SECRET:-demo-secret}
       REDIS_ADDR: redis:6379
-      LISTEN_ADDR: ":8080"
-      FLUSH_INTERVAL: 1s
-      LOG_LEVEL: ${LOG_LEVEL:-info}
       SECRETS_DIR: /secrets
-      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
-      WS_REQUIRE_AUTH: ${WS_REQUIRE_AUTH:-true}
+      LOG_LEVEL: ${LOG_LEVEL:-}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      WS_REQUIRE_AUTH: ${WS_REQUIRE_AUTH:-}
+      SYMBOLS: ${SYMBOLS:-}
     volumes:
       - secrets-data:/secrets
+      - ./config.yaml:/etc/pricing-engine/config.yaml:ro
     healthcheck:
       test: ["CMD", "/usr/local/bin/pricing-engine", "healthcheck"]
       interval: 5s
